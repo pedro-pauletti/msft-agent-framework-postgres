@@ -1,0 +1,41 @@
+[project]
+name = "postgres-maf"
+version = "1.0.0"
+description = "A didactic sample: a local Microsoft Agent Framework agent that reads and writes an Azure PostgreSQL database through the Postgres MCP Server."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    # --- Microsoft Agent Framework (MAF) ---------------------------------
+    # `agent-framework-core` gives us Agent, AgentSession and the MCP tools.
+    # `agent-framework-openai` ships OpenAIChatClient, which is what talks to
+    # Azure OpenAI. Core alone raises ModuleNotFoundError when you import it.
+    #
+    # The two packages are versioned independently: agent-framework-openai
+    # 1.14.x already requires agent-framework-core >=1.17. The mismatched
+    # numbers are expected, not a typo.
+    "agent-framework-core>=1.17,<2",
+    "agent-framework-openai>=1.14,<2",
+
+    # The MCP client library that MAF's MCP tools are built on top of.
+    "mcp>=1.24,<2",
+
+    # Entra ID (Azure AD) authentication for Azure OpenAI - this is what makes
+    # `az login` enough to run the sample, with no API keys in your .env.
+    "azure-identity>=1.19",
+
+    # Loads the .env file produced by infra/provision.*
+    "python-dotenv>=1.0",
+
+    # Only used by infra/seed.py to apply the schema. The *agent* never uses
+    # psycopg - it reaches Postgres exclusively through the MCP server.
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,20 @@
+# Secrets - the provisioning scripts write your database password here.
+# NEVER commit this file.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ruff_cache/
+uv.lock
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

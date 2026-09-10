@@ -1,0 +1,17 @@
+# Plain-pip alternative to pyproject.toml. See pyproject.toml for why each
+# dependency is here.
+#
+#   python -m venv .venv
+#   .venv\Scripts\Activate.ps1        # Windows
+#   source .venv/bin/activate         # macOS / Linux
+#   pip install -r requirements.txt
+
+# Note: these two packages are versioned independently. agent-framework-openai
+# 1.14.x already depends on agent-framework-core >=1.17, so the numbers not
+# matching is expected, not a mistake.
+agent-framework-core>=1.17,<2
+agent-framework-openai>=1.14,<2
+mcp>=1.24,<2
+azure-identity>=1.19
+python-dotenv>=1.0
+psycopg[binary]>=3.2
