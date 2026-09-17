@@ -110,7 +110,15 @@ def _shorten(text: str, limit: int = 600) -> str:
 
 def print_tool_calls(response: Any, *, show_results: bool = True, colour: bool = True) -> None:
     """Print a readable trace of everything the agent did to the database."""
-    calls = extract_tool_calls(response)
+    print_calls(extract_tool_calls(response), show_results=show_results, colour=colour)
+
+
+def print_calls(calls: list[ToolCall], *, show_results: bool = True, colour: bool = True) -> None:
+    """Same output, for callers that collected the tool calls themselves.
+
+    `src/foundry/main.py` drives the tool loop by hand, so it has the calls
+    already and never builds an `AgentResponse`.
+    """
     if not calls:
         print(_c("(the agent answered without touching the database)", DIM, colour))
         return
@@ -128,7 +136,7 @@ def print_tool_calls(response: Any, *, show_results: bool = True, colour: bool =
             print(f"    {_c(json.dumps(call.arguments, default=str), YELLOW, colour)}")
 
         if show_results and call.result:
-            for line in call.result.splitlines():
+            for line in _shorten(_clean_result(call.result)).splitlines():
                 print(f"    {_c('-> ' + line, DIM, colour)}")
     print(_c("--- end of trace ---\n", DIM, colour))
 

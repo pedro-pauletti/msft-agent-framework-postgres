@@ -25,7 +25,7 @@ cp .env.example .env
 
 # 4. Run
 az login
-python -m src.main
+python -m src.maf.main
 ```
 
 That is genuinely it. The rest of this document explains each decision.
@@ -128,9 +128,9 @@ Smaller models are cheaper and faster but write worse SQL against complex schema
 AZURE_OPENAI_API_KEY=abc123...
 ```
 
-`src/agent.py` switches automatically when it sees a key.
+`src/maf/agent.py` switches automatically when it sees a key.
 
-> ⚠️ If `OPENAI_API_KEY` (no `AZURE_` prefix) is set in your shell, Agent Framework prefers it and silently routes to **public OpenAI**. This sample always passes an explicit Azure endpoint so it is safe, but watch for the trap in your own code. `src/config.py` prints a note when it sees that variable.
+> ⚠️ If `OPENAI_API_KEY` (no `AZURE_` prefix) is set in your shell, Agent Framework prefers it and silently routes to **public OpenAI**. This sample always passes an explicit Azure endpoint so it is safe, but watch for the trap in your own code. `src/maf/config.py` prints a note when it sees that variable.
 
 ---
 
@@ -173,12 +173,12 @@ AGENT_INSTRUCTIONS_FILE=prompts/my-database.md
 
 Fill in the tables, the columns and — most importantly — the **allowed values of status-like columns** and any **business rules the schema cannot express**. The model cannot guess that `status` only accepts `'open' | 'closed' | 'archived'`, or that resolving a ticket also requires setting `closed_at`.
 
-Look at `FIBEROPS_INSTRUCTIONS` in [`src/agent.py`](../src/agent.py) for a complete worked example.
+Look at `FIBEROPS_INSTRUCTIONS` in [`src/common/prompts.py`](../src/common/prompts.py) for a complete worked example.
 
 #### Shortcut: have the agent write the first draft
 
 1. Start with Option A.
-2. Run `python -m src.main` and ask:
+2. Run `python -m src.maf.main` and ask:
 
    > Inspect this database and write me a concise schema description listing every table, its columns with types, and the relationships between them. Format it like a reference document.
 
@@ -223,7 +223,7 @@ POSTGRES_MCP_ACCESS_MODE=unrestricted
 POSTGRES_MCP_APPROVAL_MODE=always_require
 ```
 
-Now every statement is shown to you before it runs. See [`src/examples/human_approval.py`](../src/examples/human_approval.py).
+Now every statement is shown to you before it runs. See [`src/maf/examples/human_approval.py`](../src/maf/examples/human_approval.py).
 
 ### The guardrail that actually works
 
@@ -241,7 +241,7 @@ GRANT INSERT, UPDATE ON alert_notes TO agent_readonly;
 
 Put that role in `PGUSER`/`PGPASSWORD`. Now it does not matter what the model decides to try.
 
-You can also hide tools from the model entirely, in `src/agent.py`:
+You can also hide tools from the model entirely, in `src/maf/agent.py`:
 
 ```python
 MCPStdioTool(
@@ -254,9 +254,9 @@ MCPStdioTool(
 
 ## Step 5 — the examples
 
-`src/main.py` works against any database.
+`src/maf/main.py` works against any database.
 
-The three scripts in `src/examples/` are written for the FiberOps sample data. They detect when `AGENT_INSTRUCTIONS_FILE` is set and refuse to run rather than doing something meaningless — or destructive — against your tables:
+The three scripts in `src/maf/examples/` are written for the FiberOps sample data. They detect when `AGENT_INSTRUCTIONS_FILE` is set and refuse to run rather than doing something meaningless — or destructive — against your tables:
 
 ```
 This example writes to the FiberOps sample tables (alert_notes,
@@ -286,7 +286,7 @@ Before your first run against your own environment:
 Then:
 
 ```bash
-python -m src.main
+python -m src.maf.main
 ```
 
 Ask it something you already know the answer to, and check the SQL in the trace. If that looks right, you are in business.
@@ -297,7 +297,7 @@ Ask it something you already know the answer to, and check the SQL in the trace.
 
 ### A different MCP server
 
-`src/agent.py` builds one `MCPStdioTool`. Swap the command and you have a different backend — MySQL, SQLite, MongoDB, or your own MCP server. Nothing else in the repo changes.
+`src/maf/agent.py` builds one `MCPStdioTool`. Swap the command and you have a different backend — MySQL, SQLite, MongoDB, or your own MCP server. Nothing else in the repo changes.
 
 ### Several databases at once
 

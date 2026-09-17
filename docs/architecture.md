@@ -12,7 +12,7 @@ This document explains the moving parts and, more importantly, *why* each choice
 flowchart TB
     subgraph local["💻 Your machine"]
         direction TB
-        CLI["<b>python -m src.main</b>"]
+        CLI["<b>python -m src.maf.main</b>"]
         Agent["<b>Agent</b> (agent_framework)<br/>instructions: schema<br/>tools: [MCPStdioTool]<br/>session: AgentSession"]
         MCPProc["<b>postgres-mcp</b><br/><small>child process, own Python env<br/>started by uvx</small>"]
         CLI --> Agent
@@ -65,7 +65,7 @@ sequenceDiagram
 4. `postgres-mcp` runs the statement and writes the result back on stdout.
 5. Agent Framework appends the result to the conversation and calls the model again.
 6. The model now has real data and produces the final answer.
-7. `src/trace.py` walks `response.messages` and prints steps 2 and 4 so you can see exactly what happened.
+7. `src/common/trace.py` walks `response.messages` and prints steps 2 and 4 so you can see exactly what happened.
 
 Steps 2–5 can repeat several times in a single turn.
 
@@ -134,7 +134,7 @@ await agent.run("Which link has the most open alerts?", session=session)
 await agent.run("Add a note to all of them.", session=session)  # knows "them"
 ```
 
-Omit `session=` and every call is independent. That is cheaper (no history resent) and correct for a batch of unrelated questions — which is exactly what `src/examples/read_only.py` does.
+Omit `session=` and every call is independent. That is cheaper (no history resent) and correct for a batch of unrelated questions — which is exactly what `src/maf/examples/read_only.py` does.
 
 For persistence beyond process lifetime, Agent Framework provides `SessionStore` and `FileSessionStore`.
 

@@ -312,7 +312,7 @@ Next steps:
        az login
 
   3. Chat with the agent:
-       python -m src.main
+       python -m src.maf.main
 
 When you are done, stop the server so it stops costing money:
        az postgres flexible-server stop -g $ResourceGroup -n $ServerName

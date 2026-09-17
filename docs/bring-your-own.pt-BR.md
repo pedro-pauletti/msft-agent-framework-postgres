@@ -25,7 +25,7 @@ cp .env.example .env
 
 # 4. Rode
 az login
-python -m src.main
+python -m src.maf.main
 ```
 
 É isso mesmo. O resto deste documento explica cada decisão.
@@ -128,9 +128,9 @@ Modelos menores são mais baratos e rápidos, mas escrevem SQL pior em schemas c
 AZURE_OPENAI_API_KEY=abc123...
 ```
 
-O `src/agent.py` troca de caminho automaticamente quando encontra uma chave.
+O `src/maf/agent.py` troca de caminho automaticamente quando encontra uma chave.
 
-> ⚠️ Se `OPENAI_API_KEY` (sem o prefixo `AZURE_`) estiver definida no seu shell, o Agent Framework dá preferência a ela e roteia silenciosamente para o **OpenAI público**. Este exemplo sempre passa um endpoint Azure explícito, então está seguro, mas fique atento à armadilha no seu próprio código. O `src/config.py` imprime um aviso quando encontra essa variável.
+> ⚠️ Se `OPENAI_API_KEY` (sem o prefixo `AZURE_`) estiver definida no seu shell, o Agent Framework dá preferência a ela e roteia silenciosamente para o **OpenAI público**. Este exemplo sempre passa um endpoint Azure explícito, então está seguro, mas fique atento à armadilha no seu próprio código. O `src/maf/config.py` imprime um aviso quando encontra essa variável.
 
 ---
 
@@ -173,12 +173,12 @@ AGENT_INSTRUCTIONS_FILE=prompts/meu-banco.md
 
 Preencha as tabelas, as colunas e — o mais importante — os **valores permitidos das colunas de status** e quaisquer **regras de negócio que o schema não expressa**. O modelo não tem como adivinhar que `status` só aceita `'open' | 'closed' | 'archived'`, nem que resolver um chamado exige também preencher `closed_at`.
 
-Veja o `FIBEROPS_INSTRUCTIONS` em [`src/agent.py`](../src/agent.py) como exemplo completo.
+Veja o `FIBEROPS_INSTRUCTIONS` em [`src/common/prompts.py`](../src/common/prompts.py) como exemplo completo.
 
 #### Atalho: peça ao agente para escrever o primeiro rascunho
 
 1. Comece com a Opção A.
-2. Rode `python -m src.main` e pergunte:
+2. Rode `python -m src.maf.main` e pergunte:
 
    > Inspecione este banco e escreva uma descrição concisa do schema listando todas as tabelas, suas colunas com tipos, e os relacionamentos entre elas. Formate como um documento de referência.
 
@@ -223,7 +223,7 @@ POSTGRES_MCP_ACCESS_MODE=unrestricted
 POSTGRES_MCP_APPROVAL_MODE=always_require
 ```
 
-Agora cada comando é mostrado a você antes de rodar. Veja [`src/examples/human_approval.py`](../src/examples/human_approval.py).
+Agora cada comando é mostrado a você antes de rodar. Veja [`src/maf/examples/human_approval.py`](../src/maf/examples/human_approval.py).
 
 ### A proteção que realmente funciona
 
@@ -241,7 +241,7 @@ GRANT INSERT, UPDATE ON alert_notes TO agent_readonly;
 
 Coloque essa role em `PGUSER`/`PGPASSWORD`. Aí não importa o que o modelo resolver tentar.
 
-Você também pode esconder ferramentas do modelo por completo, em `src/agent.py`:
+Você também pode esconder ferramentas do modelo por completo, em `src/maf/agent.py`:
 
 ```python
 MCPStdioTool(
@@ -254,9 +254,9 @@ MCPStdioTool(
 
 ## Passo 5 — os exemplos
 
-O `src/main.py` funciona com qualquer banco.
+O `src/maf/main.py` funciona com qualquer banco.
 
-Os três scripts em `src/examples/` foram escritos para os dados de exemplo do FiberOps. Eles detectam quando `AGENT_INSTRUCTIONS_FILE` está definido e se recusam a rodar, em vez de fazer algo sem sentido — ou destrutivo — nas suas tabelas:
+Os três scripts em `src/maf/examples/` foram escritos para os dados de exemplo do FiberOps. Eles detectam quando `AGENT_INSTRUCTIONS_FILE` está definido e se recusam a rodar, em vez de fazer algo sem sentido — ou destrutivo — nas suas tabelas:
 
 ```
 This example writes to the FiberOps sample tables (alert_notes,
@@ -286,7 +286,7 @@ Antes da primeira execução no seu ambiente:
 Então:
 
 ```bash
-python -m src.main
+python -m src.maf.main
 ```
 
 Pergunte algo cuja resposta você já conhece e confira o SQL no trace. Se estiver certo, você está pronto.
@@ -297,7 +297,7 @@ Pergunte algo cuja resposta você já conhece e confira o SQL no trace. Se estiv
 
 ### Um servidor MCP diferente
 
-O `src/agent.py` monta um `MCPStdioTool`. Troque o comando e você tem outro backend — MySQL, SQLite, MongoDB, ou o seu próprio servidor MCP. Nada mais no repositório muda.
+O `src/maf/agent.py` monta um `MCPStdioTool`. Troque o comando e você tem outro backend — MySQL, SQLite, MongoDB, ou o seu próprio servidor MCP. Nada mais no repositório muda.
 
 ### Vários bancos ao mesmo tempo
 

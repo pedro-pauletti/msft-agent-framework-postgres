@@ -27,7 +27,7 @@ import psycopg
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.config import ConfigError, load_env, load_postgres_config
+from src.common.config import ConfigError, load_env, load_postgres_config
 
 SEED_SQL_PATH = REPO_ROOT / "infra" / "seed.sql"
 

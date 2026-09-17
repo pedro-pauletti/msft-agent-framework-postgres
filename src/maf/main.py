@@ -4,13 +4,13 @@ Interactive chat with the FiberOps agent.
 
 Run it from the repository root:
 
-    python -m src.main
+    python -m src.maf.main
 
 Type a question in any language. Type `/exit` to quit, `/help` for commands.
 
 What this file demonstrates
 ---------------------------
-* Wiring an Agent Framework agent to an MCP server (see `src/agent.py`).
+* Wiring an Agent Framework agent to an MCP server (see `src/maf/agent.py`).
 * Keeping conversation state across turns with an `AgentSession`.
 * Streaming the answer token by token with `agent.run(..., stream=True)`.
 * Showing the SQL the model wrote, so nothing feels like magic.
@@ -21,10 +21,14 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from src.agent import build_agent
-from src.config import ConfigError, load_config
-from src.preflight import check_database_reachable
-from src.trace import print_tool_calls
+from agent_framework.exceptions import ToolException
+
+from src.common.config import ConfigError
+from src.common.preflight import check_database_reachable
+from src.common.trace import print_tool_calls
+from src.maf.agent import build_agent
+from src.maf.config import load_config
+from src.maf.mcp_server import explain_startup_failure
 
 BANNER = r"""
 ==============================================================================
@@ -135,9 +139,9 @@ async def chat() -> int:
                     print(
                         "\n[stdin is not interactive, so there is nothing to read]\n"
                         "Run this from a real terminal:\n"
-                        "  python -m src.main\n"
+                        "  python -m src.maf.main\n"
                         "Or try the scripted examples instead:\n"
-                        "  python -m src.examples.read_only",
+                        "  python -m src.maf.examples.read_only",
                         file=sys.stderr,
                     )
                     break
@@ -192,6 +196,9 @@ async def chat() -> int:
 
     except ConfigError as exc:
         print(f"\nConfiguration problem:\n\n{exc}\n", file=sys.stderr)
+        return 1
+    except ToolException as exc:
+        print(f"\n{explain_startup_failure(exc)}\n", file=sys.stderr)
         return 1
 
     print("Bye.")

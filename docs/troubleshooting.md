@@ -70,6 +70,21 @@ uvx --with "mcp<2" postgres-mcp --access-mode=unrestricted
 
 It should print `Starting PostgreSQL MCP Server in UNRESTRICTED mode` and then wait for input. Anything else is your real problem. Press `Ctrl+C` to exit.
 
+**On a corporate network, suspect TLS inspection.** Running it by hand shows what the MCP client cannot:
+
+```
+Caused by: client error (Connect)
+Caused by: received fatal alert: HandshakeFailure
+```
+
+`uvx` resolves the package from PyPI on every run, and an intercepting proxy breaks the handshake. If the package is already in uv's cache, skip the network by adding this to `.env`:
+
+```ini
+UV_OFFLINE=1
+```
+
+`.env` rather than your shell, so it survives new terminals. This only affects implementation 1 — implementation 2 never starts a process, because the MCP server is a container built in Azure.
+
 **Other causes:** `uvx` not on PATH; a malformed `DATABASE_URI`; no network access to PyPI on the very first run.
 
 ### The agent says it has no way to access the database
@@ -93,8 +108,8 @@ That is normal. `postgres-mcp` logs to stderr, and stderr is inherited by your p
 To silence it, redirect stderr:
 
 ```powershell
-python -m src.main 2>$null          # PowerShell
-python -m src.main 2>/dev/null      # bash
+python -m src.maf.main 2>$null          # PowerShell
+python -m src.maf.main 2>/dev/null      # bash
 ```
 
 ### The agent refuses to modify data
@@ -156,7 +171,7 @@ az cognitiveservices account deployment list `
 2. `OPENAI_API_KEY`
 3. Azure environment fallback (`AZURE_OPENAI_ENDPOINT`, ...)
 
-If `OPENAI_API_KEY` is exported in your shell and you did not pass an explicit Azure input, you silently hit public OpenAI. This sample always passes `azure_endpoint=`, so it is safe — but `src/config.py` prints a note when it sees that variable, and you should watch for the same trap in your own code.
+If `OPENAI_API_KEY` is exported in your shell and you did not pass an explicit Azure input, you silently hit public OpenAI. This sample always passes `azure_endpoint=`, so it is safe — but `src/maf/config.py` prints a note when it sees that variable, and you should watch for the same trap in your own code.
 
 ### `AZURE_OPENAI_ENDPOINT looks like a Foundry project endpoint`
 
@@ -265,7 +280,7 @@ The path is resolved relative to the repository root, not your current directory
 
 Working as intended. `read_write.py` and `human_approval.py` write to (and delete from) the FiberOps sample tables. When `AGENT_INSTRUCTIONS_FILE` is set they assume you are on your own data and stop.
 
-Use `python -m src.main`, or edit the `STEPS` / `QUESTION` constants in those files first.
+Use `python -m src.maf.main`, or edit the `STEPS` / `QUESTION` constants in those files first.
 
 ### The interactive CLI seems frozen and will not let me type
 
@@ -276,7 +291,7 @@ the MCP server, which retried the connection for ~30 seconds while flooding the
 terminal with warnings — and the `you >` prompt never appeared. It looked
 exactly like a hang.
 
-`python -m src.main` now verifies the connection first and fails in a few
+`python -m src.maf.main` now verifies the connection first and fails in a few
 seconds with an explanation. If you see `Checking database connection... FAILED`,
 read the paragraph underneath — it is almost always the firewall (see
 [`connection timeout expired`](#connection-timeout-expired)).
@@ -289,7 +304,7 @@ forward stdin, `input()` gets EOF immediately and the CLI prints:
 ```
 
 Run it from a real terminal, or use the scripted examples
-(`python -m src.examples.read_only`) which need no input.
+(`python -m src.maf.examples.read_only`) which need no input.
 
 ### It pauses for a long time on the very first run
 
@@ -300,17 +315,17 @@ is working. Later runs start in about a second.
 
 ### The agent writes bad SQL, or invents column names
 
-Look at `FIBEROPS_INSTRUCTIONS` in `src/agent.py`. If you changed `infra/seed.sql`, the prompt is now out of date — they must be kept in sync.
+Look at `FIBEROPS_INSTRUCTIONS` in `src/common/prompts.py`. If you changed `infra/seed.sql`, the prompt is now out of date — they must be kept in sync.
 
 Also make sure your deployment is a tool-calling capable model. `gpt-4.1`, `gpt-4.1-mini` and `gpt-4o` all work well.
 
 ### The agent gives a different answer each run
 
-Expected. We never tell it which SQL to write, only what outcome we want. `src/examples/read_write.py` is written to tolerate this: step 4 re-reads whatever step 1 picked.
+Expected. We never tell it which SQL to write, only what outcome we want. `src/maf/examples/read_write.py` is written to tolerate this: step 4 re-reads whatever step 1 picked.
 
 ### Accented characters look wrong on Windows
 
-`src/main.py` forces UTF-8 on stdout and stderr. If you are running your own script instead, do the same:
+Both CLIs force UTF-8 on stdout and stderr. If you are running your own script instead, do the same:
 
 ```python
 sys.stdout.reconfigure(encoding="utf-8")
@@ -342,7 +357,7 @@ $env:DATABASE_URI = "postgresql://user:pass@host:5432/db?sslmode=require"
 uvx --with "mcp<2" postgres-mcp --access-mode=unrestricted   # Ctrl+C to exit
 
 # 4. Everything together
-python -m src.examples.read_only
+python -m src.maf.examples.read_only
 ```
 
 Step 4 exercises every layer at once, and the traceback tells you which one failed.

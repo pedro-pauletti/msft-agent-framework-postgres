@@ -2,7 +2,7 @@
 Example 2 - writing to the database, with proof that it stuck.
 ================================================================================
 
-    python -m src.examples.read_write
+    python -m src.maf.examples.read_write
 
 This is the example that shows the whole point of the sample. The agent:
 
@@ -34,10 +34,14 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from src.agent import build_agent
-from src.config import ConfigError, load_config
-from src.preflight import check_database_reachable
-from src.trace import print_tool_calls
+from agent_framework.exceptions import ToolException
+
+from src.common.config import ConfigError
+from src.common.preflight import check_database_reachable
+from src.common.trace import print_tool_calls
+from src.maf.agent import build_agent
+from src.maf.config import load_config
+from src.maf.mcp_server import explain_startup_failure
 
 # The four steps of the walkthrough. Each is one turn in the same conversation.
 STEPS: list[tuple[str, str]] = [
@@ -100,7 +104,7 @@ async def main() -> int:
             f"{config.instructions_file.name},\n"
             "so you are probably pointed at your own database. Refusing to run.\n\n"
             "To try the write walkthrough against your own data, edit STEPS in\n"
-            "this file first. Or just use `python -m src.main`.",
+            "this file first. Or just use `python -m src.maf.main`.",
             file=sys.stderr,
         )
         return 1
@@ -113,21 +117,25 @@ async def main() -> int:
         print(f"\n{exc}\n", file=sys.stderr)
         return 1
 
-    async with build_agent(config) as agent:
-        # ONE session shared by every step. This is the agent's short-term
-        # memory: without it, step 2 would not know what "that alert" means.
-        session = agent.create_session()
+    try:
+        async with build_agent(config) as agent:
+            # ONE session shared by every step. This is the agent's short-term
+            # memory: without it, step 2 would not know what "that alert" means.
+            session = agent.create_session()
 
-        for title, prompt in STEPS:
-            print("=" * 78)
-            print(title)
-            print("=" * 78)
-            print(f"> {prompt}\n")
+            for title, prompt in STEPS:
+                print("=" * 78)
+                print(title)
+                print("=" * 78)
+                print(f"> {prompt}\n")
 
-            response = await agent.run(prompt, session=session)
+                response = await agent.run(prompt, session=session)
 
-            print(f"{response.text}\n")
-            print_tool_calls(response)
+                print(f"{response.text}\n")
+                print_tool_calls(response)
+    except ToolException as exc:
+        print(f"\n{explain_startup_failure(exc)}\n", file=sys.stderr)
+        return 1
 
     print("Done. Run `python -m infra.seed` to reset the sample data.")
     return 0

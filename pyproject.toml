@@ -1,7 +1,7 @@
 [project]
 name = "postgres-maf"
 version = "1.0.0"
-description = "A didactic sample: a local Microsoft Agent Framework agent that reads and writes an Azure PostgreSQL database through the Postgres MCP Server."
+description = "A didactic sample: an AI agent that reads and writes an Azure PostgreSQL database through the Postgres MCP Server, implemented twice - with the Microsoft Agent Framework and with the Foundry Agent Service."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -18,7 +18,15 @@ dependencies = [
     "agent-framework-core>=1.17,<2",
     "agent-framework-openai>=1.14,<2",
 
+    # --- Microsoft Foundry Agent Service ---------------------------------
+    # Only needed by the src/foundry/ variant, which registers the agent in a
+    # Foundry project instead of building it in memory. Pulls in the `openai`
+    # package, which is how the Responses API is reached.
+    # See docs/implementations.md.
+    "azure-ai-projects>=2.6,<3",
+
     # The MCP client library that MAF's MCP tools are built on top of.
+    # The Foundry variant uses it directly, to drive the MCP session itself.
     "mcp>=1.24,<2",
 
     # Entra ID (Azure AD) authentication for Azure OpenAI - this is what makes

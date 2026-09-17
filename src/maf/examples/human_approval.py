@@ -2,7 +2,7 @@
 Example 3 - human-in-the-loop approval (the "graduation" step).
 ================================================================================
 
-    python -m src.examples.human_approval
+    python -m src.maf.examples.human_approval
 
 Examples 1 and 2 run with `approval_mode="never_require"`: whatever SQL the
 model writes is executed immediately. That is fine for a throwaway demo
@@ -54,10 +54,13 @@ from dataclasses import replace
 from typing import Any
 
 from agent_framework import Message
+from agent_framework.exceptions import ToolException
 
-from src.agent import build_agent
-from src.config import ConfigError, load_config
-from src.preflight import check_database_reachable
+from src.common.config import ConfigError
+from src.common.preflight import check_database_reachable
+from src.maf.agent import build_agent
+from src.maf.config import load_config
+from src.maf.mcp_server import explain_startup_failure
 
 # A deliberately destructive-sounding request, so that saying "no" is meaningful.
 QUESTION = (
@@ -137,42 +140,46 @@ async def main() -> int:
     print("=" * 78)
     print(f"\nQuestion: {QUESTION}\n")
 
-    async with build_agent(config) as agent:
-        # Approval state is stored in the session, so a session is required.
-        session = agent.create_session()
+    try:
+        async with build_agent(config) as agent:
+            # Approval state is stored in the session, so a session is required.
+            session = agent.create_session()
 
-        # The first turn is the user's question. Subsequent turns carry approval
-        # decisions instead.
-        next_input: str | Message = QUESTION
+            # The first turn is the user's question. Subsequent turns carry approval
+            # decisions instead.
+            next_input: str | Message = QUESTION
 
-        for round_number in range(1, MAX_ROUNDS + 1):
-            response = await agent.run(next_input, session=session)
+            for round_number in range(1, MAX_ROUNDS + 1):
+                response = await agent.run(next_input, session=session)
 
-            pending = list(response.user_input_requests)
-            if not pending:
-                # No approvals outstanding: this is the final answer.
-                print(f"\nagent > {response.text}\n")
-                break
+                pending = list(response.user_input_requests)
+                if not pending:
+                    # No approvals outstanding: this is the final answer.
+                    print(f"\nagent > {response.text}\n")
+                    break
 
-            print(f"\n[round {round_number}] {len(pending)} call(s) awaiting approval")
+                print(f"\n[round {round_number}] {len(pending)} call(s) awaiting approval")
 
-            decisions = []
-            for request in pending:
-                approved = _ask_human(request)
-                print("  -> approved" if approved else "  -> denied")
-                # Turn the request into a response the agent understands.
-                decisions.append(request.to_function_approval_response(approved))
+                decisions = []
+                for request in pending:
+                    approved = _ask_human(request)
+                    print("  -> approved" if approved else "  -> denied")
+                    # Turn the request into a response the agent understands.
+                    decisions.append(request.to_function_approval_response(approved))
 
-            # Feed the decisions back as the next user message.
-            next_input = Message(role="user", contents=decisions)
-        else:
-            print(
-                f"\nStopped after {MAX_ROUNDS} approval rounds without a final "
-                "answer. That usually means the agent kept retrying calls you "
-                "denied.",
-                file=sys.stderr,
-            )
-            return 1
+                # Feed the decisions back as the next user message.
+                next_input = Message(role="user", contents=decisions)
+            else:
+                print(
+                    f"\nStopped after {MAX_ROUNDS} approval rounds without a final "
+                    "answer. That usually means the agent kept retrying calls you "
+                    "denied.",
+                    file=sys.stderr,
+                )
+                return 1
+    except ToolException as exc:
+        print(f"\n{explain_startup_failure(exc)}\n", file=sys.stderr)
+        return 1
 
     print("Tip: run this again and answer 'n' to see how the agent reacts to a refusal.")
     return 0

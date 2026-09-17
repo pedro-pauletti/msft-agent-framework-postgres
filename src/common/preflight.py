@@ -19,7 +19,7 @@ telling you what to fix.
 
 from __future__ import annotations
 
-from src.config import ConfigError, PostgresConfig
+from src.common.config import ConfigError, PostgresConfig
 
 # Short on purpose. This is a reachability check, not a workload - if the
 # server cannot answer in this long, something is wrong and we want to say so

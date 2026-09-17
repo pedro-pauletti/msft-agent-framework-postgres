@@ -2,7 +2,7 @@
 Example 1 - reading from the database.
 ================================================================================
 
-    python -m src.examples.read_only
+    python -m src.maf.examples.read_only
 
 The simplest possible use of the agent: ask questions, get answers backed by
 real SQL. Nothing is modified.
@@ -20,10 +20,14 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from src.agent import build_agent
-from src.config import ConfigError, load_config
-from src.preflight import check_database_reachable
-from src.trace import print_tool_calls
+from agent_framework.exceptions import ToolException
+
+from src.common.config import ConfigError
+from src.common.preflight import check_database_reachable
+from src.common.trace import print_tool_calls
+from src.maf.agent import build_agent
+from src.maf.config import load_config
+from src.maf.mcp_server import explain_startup_failure
 
 # Each of these becomes one independent turn. They are deliberately varied:
 # a simple count, an aggregation, a join, and an open-ended analytical question.
@@ -56,7 +60,7 @@ async def main() -> int:
             "NOTE: this example asks questions about the FiberOps sample data,\n"
             f"but AGENT_INSTRUCTIONS_FILE is set to {config.instructions_file.name},\n"
             "so you are probably pointed at your own database. The questions\n"
-            "below will not make sense. Use `python -m src.main` instead, or\n"
+            "below will not make sense. Use `python -m src.maf.main` instead, or\n"
             "edit QUESTIONS in this file.\n",
             file=sys.stderr,
         )
@@ -71,19 +75,23 @@ async def main() -> int:
 
     # `async with` starts the Postgres MCP server as a child process and stops
     # it on exit. Without it the agent has no tools at all.
-    async with build_agent(config) as agent:
-        for number, question in enumerate(QUESTIONS, start=1):
-            print("=" * 78)
-            print(f"Q{number}: {question}")
-            print("=" * 78)
+    try:
+        async with build_agent(config) as agent:
+            for number, question in enumerate(QUESTIONS, start=1):
+                print("=" * 78)
+                print(f"Q{number}: {question}")
+                print("=" * 78)
 
-            # No `session=`, so this turn knows nothing about the previous ones.
-            response = await agent.run(question)
+                # No `session=`, so this turn knows nothing about the previous ones.
+                response = await agent.run(question)
 
-            print(f"\n{response.text}\n")
+                print(f"\n{response.text}\n")
 
-            # Show the SQL the model wrote. This is the interesting part.
-            print_tool_calls(response)
+                # Show the SQL the model wrote. This is the interesting part.
+                print_tool_calls(response)
+    except ToolException as exc:
+        print(f"\n{explain_startup_failure(exc)}\n", file=sys.stderr)
+        return 1
 
     return 0
 

@@ -70,6 +70,21 @@ uvx --with "mcp<2" postgres-mcp --access-mode=unrestricted
 
 Ele deve imprimir `Starting PostgreSQL MCP Server in UNRESTRICTED mode` e ficar esperando entrada. Qualquer outra coisa é o seu problema real. `Ctrl+C` para sair.
 
+**Em rede corporativa, desconfie de inspeção TLS.** Rodar na mão mostra o que o cliente MCP não consegue ver:
+
+```
+Caused by: client error (Connect)
+Caused by: received fatal alert: HandshakeFailure
+```
+
+O `uvx` resolve o pacote no PyPI a cada execução, e um proxy interceptador quebra o handshake. Se o pacote já está no cache do `uv`, pule a rede adicionando isto ao `.env`:
+
+```ini
+UV_OFFLINE=1
+```
+
+No `.env`, não no shell, para sobreviver a terminais novos. Isso afeta só a implementação 1 — a implementação 2 nunca sobe processo, porque o servidor MCP é um contêiner construído no Azure.
+
 **Outras causas:** `uvx` fora do PATH; `DATABASE_URI` malformada; sem acesso de rede ao PyPI na primeira execução.
 
 ### O agente diz que não tem como acessar o banco
@@ -93,8 +108,8 @@ Isso é normal. O `postgres-mcp` escreve log no stderr, e o stderr é herdado pe
 Para silenciar, redirecione o stderr:
 
 ```powershell
-python -m src.main 2>$null          # PowerShell
-python -m src.main 2>/dev/null      # bash
+python -m src.maf.main 2>$null          # PowerShell
+python -m src.maf.main 2>/dev/null      # bash
 ```
 
 ### O agente se recusa a modificar dados
@@ -156,7 +171,7 @@ O `OpenAIChatClient` resolve a configuração nesta ordem:
 2. `OPENAI_API_KEY`
 3. Fallback pelas variáveis de ambiente Azure (`AZURE_OPENAI_ENDPOINT`, ...)
 
-Se `OPENAI_API_KEY` estiver exportada no seu shell e você não passar uma entrada Azure explícita, você cai silenciosamente no OpenAI público. Este exemplo sempre passa `azure_endpoint=`, então está seguro — mas o `src/config.py` imprime um aviso quando vê essa variável, e você deve ficar atento à mesma armadilha no seu próprio código.
+Se `OPENAI_API_KEY` estiver exportada no seu shell e você não passar uma entrada Azure explícita, você cai silenciosamente no OpenAI público. Este exemplo sempre passa `azure_endpoint=`, então está seguro — mas o `src/maf/config.py` imprime um aviso quando vê essa variável, e você deve ficar atento à mesma armadilha no seu próprio código.
 
 ### `AZURE_OPENAI_ENDPOINT looks like a Foundry project endpoint`
 
@@ -265,7 +280,7 @@ O caminho é resolvido em relação à raiz do repositório, não ao diretório 
 
 Funcionando como esperado. O `read_write.py` e o `human_approval.py` escrevem (e apagam) nas tabelas de exemplo do FiberOps. Quando `AGENT_INSTRUCTIONS_FILE` está definido, eles assumem que você está nos seus próprios dados e param.
 
-Use `python -m src.main`, ou edite as constantes `STEPS` / `QUESTION` desses arquivos antes.
+Use `python -m src.maf.main`, ou edite as constantes `STEPS` / `QUESTION` desses arquivos antes.
 
 ### A CLI interativa parece travada e não me deixa digitar
 
@@ -276,7 +291,7 @@ servidor MCP, que tentava conectar por ~30 segundos enquanto inundava o terminal
 com warnings — e o prompt `you >` nunca aparecia. Parecia exatamente um
 travamento.
 
-O `python -m src.main` agora verifica a conexão antes e falha em poucos segundos
+O `python -m src.maf.main` agora verifica a conexão antes e falha em poucos segundos
 com uma explicação. Se você vir `Checking database connection... FAILED`, leia o
 parágrafo abaixo — quase sempre é o firewall (veja
 [`connection timeout expired`](#connection-timeout-expired)).
@@ -289,7 +304,7 @@ sua IDE não repassa o stdin, o `input()` recebe EOF na hora e a CLI imprime:
 ```
 
 Rode a partir de um terminal de verdade, ou use os exemplos roteirizados
-(`python -m src.examples.read_only`), que não precisam de entrada.
+(`python -m src.maf.examples.read_only`), que não precisam de entrada.
 
 ### Demora muito na primeiríssima execução
 
@@ -300,17 +315,17 @@ saber que está funcionando. As execuções seguintes sobem em cerca de um segun
 
 ### O agente escreve SQL ruim, ou inventa nomes de coluna
 
-Olhe o `FIBEROPS_INSTRUCTIONS` em `src/agent.py`. Se você mudou o `infra/seed.sql`, o prompt está desatualizado — os dois precisam ser mantidos em sincronia.
+Olhe o `FIBEROPS_INSTRUCTIONS` em `src/common/prompts.py`. Se você mudou o `infra/seed.sql`, o prompt está desatualizado — os dois precisam ser mantidos em sincronia.
 
 Confirme também que o seu deployment é de um modelo com suporte a tool calling. `gpt-4.1`, `gpt-4.1-mini` e `gpt-4o` funcionam bem.
 
 ### O agente dá uma resposta diferente a cada execução
 
-Esperado. Nunca dizemos qual SQL escrever, apenas qual resultado queremos. O `src/examples/read_write.py` foi escrito para tolerar isso: o passo 4 relê o que quer que o passo 1 tenha escolhido.
+Esperado. Nunca dizemos qual SQL escrever, apenas qual resultado queremos. O `src/maf/examples/read_write.py` foi escrito para tolerar isso: o passo 4 relê o que quer que o passo 1 tenha escolhido.
 
 ### Caracteres acentuados aparecem errados no Windows
 
-O `src/main.py` força UTF-8 no stdout e no stderr. Se você estiver rodando seu próprio script, faça o mesmo:
+As duas CLIs forçam UTF-8 no stdout e no stderr. Se você estiver rodando seu próprio script, faça o mesmo:
 
 ```python
 sys.stdout.reconfigure(encoding="utf-8")
@@ -342,7 +357,7 @@ $env:DATABASE_URI = "postgresql://user:senha@host:5432/db?sslmode=require"
 uvx --with "mcp<2" postgres-mcp --access-mode=unrestricted   # Ctrl+C para sair
 
 # 4. Tudo junto
-python -m src.examples.read_only
+python -m src.maf.examples.read_only
 ```
 
 O passo 4 exercita todas as camadas de uma vez, e o traceback diz qual delas falhou.

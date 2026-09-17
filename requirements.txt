@@ -11,6 +11,10 @@
 # matching is expected, not a mistake.
 agent-framework-core>=1.17,<2
 agent-framework-openai>=1.14,<2
+
+# Microsoft Foundry Agent Service. Only the src/foundry/ variant needs it.
+azure-ai-projects>=2.6,<3
+
 mcp>=1.24,<2
 azure-identity>=1.19
 python-dotenv>=1.0

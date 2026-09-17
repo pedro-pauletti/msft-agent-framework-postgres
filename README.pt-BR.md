@@ -1,6 +1,6 @@
-# Agent Framework + Postgres MCP Server
+# Agente de IA + Postgres — Agent Framework *e* Foundry Agent Service
 
-**Um exemplo pequeno e reprodutível: um agente de IA local que lê *e escreve* num banco Azure PostgreSQL, usando o [Microsoft Agent Framework](https://learn.microsoft.com/pt-br/agent-framework/overview/?pivots=programming-language-python) e o [Postgres MCP Server](https://github.com/crystaldba/postgres-mcp).**
+**Um exemplo pequeno e reprodutível: um agente de IA local que lê *e escreve* num banco Azure PostgreSQL através do [Postgres MCP Server](https://github.com/crystaldba/postgres-mcp) — construído duas vezes, uma com o [Microsoft Agent Framework](https://learn.microsoft.com/pt-br/agent-framework/overview/?pivots=programming-language-python) e outra com o [Foundry Agent Service](https://learn.microsoft.com/azure/ai-foundry/agents/overview), para você comparar lado a lado.**
 
 *[Read in English](README.md)*
 
@@ -9,34 +9,85 @@ Ninguém escreve SQL para o agente. Você descreve um resultado em linguagem nat
 ```mermaid
 flowchart LR
     User["👤 Você<br/><small>CLI</small>"]
-    Agent["🤖 Agent<br/><small>Agent Framework<br/>+ MCPStdioTool</small>"]
+
+    subgraph impl[" Escolha uma implementação "]
+        direction TB
+        MAF["🤖 <b>src/maf</b><br/><small>Agent Framework<br/>agente montado em memória</small>"]
+        FDY["☁️ <b>src/foundry</b><br/><small>Agent Service<br/>agente salvo num projeto</small>"]
+    end
+
     MCP["🔌 postgres-mcp<br/><small>iniciado pelo uvx</small>"]
     DB[("🐘 Azure<br/>PostgreSQL")]
-    AOAI["🧠 Azure OpenAI<br/><small>gpt-4.1</small>"]
+    Model["🧠 gpt-4.1"]
 
-    User <--> Agent
-    Agent <-->|"stdio<br/>JSON-RPC"| MCP
+    User <--> impl
+    MAF <-->|"stdio<br/>JSON-RPC"| MCP
+    FDY <-->|"stdio<br/>JSON-RPC"| MCP
     MCP <-->|"TCP 5432<br/>+ TLS"| DB
-    Agent <-->|HTTPS| AOAI
+    impl <-->|HTTPS| Model
 ```
 
 O banco de exemplo é de uma operadora de telecom fictícia monitorando seu backbone de fibra óptica: sites, enlaces, alertas e anotações de técnicos.
 
 ---
 
-## Duas formas de usar este repositório
+## As duas implementações
+
+Mesmo banco, mesmo servidor MCP, mesmo prompt de sistema, mesma experiência de CLI. **Só o runtime muda.** É esse o ponto do repositório: tudo o que difere entre as duas é uma diferença real entre os SDKs, não uma diferença de cenário.
+
+```
+src/
+├── common/     compartilhado: .env, o prompt de sistema, o trace de SQL
+├── maf/        implementação 1 — Microsoft Agent Framework
+└── foundry/    implementação 2 — Foundry Agent Service
+```
+
+| | `src/maf/` | `src/foundry/` |
+|---|---|---|
+| **SDK** | `agent-framework-core` + `agent-framework-openai` | `azure-ai-projects` |
+| **Onde o agente vive** | Em memória, enquanto seu processo roda | Salvo num projeto Foundry |
+| **Visível no portal** | Não — é um objeto Python | **Sim**, em Agents, com instruções e ferramentas |
+| **Versionamento** | Nenhum. Edite o código e reinicie | Cada sync cria uma nova versão imutável |
+| **Etapa de implantação** | Nenhuma | `python -m src.foundry.sync` |
+| **Quem executa o laço de ferramentas** | O framework, de forma invisível | O Agent Service, remotamente |
+| **Como o Postgres é ligado** | `MCPStdioTool` — um processo filho gerenciado pelo framework | Uma tool `mcp` apontando para um servidor MCP hospedado |
+| **Onde o servidor MCP roda** | Na sua máquina, iniciado pelo `uvx` | No Azure Container Apps |
+| **Funciona sem o seu código rodando** | Não | **Sim** — playground do portal, routines, outros agentes |
+| **Memória de conversa** | `AgentSession` | `previous_response_id` |
+| **Streaming de tokens** | Sim, nativo | Não implementado aqui |
+| **Configuração do modelo** | `AZURE_OPENAI_*` (`openai.azure.com`) | `FOUNDRY_*` (`services.ai.azure.com/api/projects/...`) |
+| **Credenciais do banco** | Na sua máquina, no `.env` | Só no contêiner — este processo nunca as vê |
+| **Permissão extra no Azure** | Cognitive Services OpenAI User | Azure AI User no projeto |
+| **Infraestrutura extra** | Nenhuma | Container Registry + Container Apps |
+| **Como rodar** | `python -m src.maf.main` | `pwsh infra/deploy-mcp.ps1`, `python -m src.foundry.sync` e `python -m src.foundry.main` |
+
+### Quando usar cada uma
+
+**Use o Agent Framework quando o agente faz parte de uma aplicação que você está escrevendo.** É menos código, ele cuida de streaming e sessões, e o agente é só um objeto — sem etapa de implantação, sem nada para manter sincronizado, sem permissão extra no Azure. É o padrão certo para embutir um agente dentro de um serviço, de um job ou de uma CLI.
+
+**Use o Agent Service quando o agente em si é o artefato.** Quando ele precisa ser encontrável por outras pessoas, versionado e governado, avaliado com o ferramental de avaliação do Foundry, editado no portal por alguém que não tem o seu repositório, ou invocado por algo que não é o seu código — routines agendadas, Teams, outro agente.
+
+**Não são excludentes.** Um destino razoável é usar as duas: a definição e a governança no projeto Foundry, a orquestração na sua aplicação.
+
+> ⚠️ **Uma restrição que molda todo o resto.** Um prompt agent do Foundry roda *dentro do serviço*, e o Agent Service só aceita servidores MCP que sejam **endpoints HTTPS remotos**. O `postgres-mcp` é um processo local em stdio — nada no Azure consegue subi-lo. Então a implementação 2 primeiro o publica como contêiner (`infra/deploy-mcp.ps1`) e o agente aponta para ele. É por isso que ela precisa de uma infraestrutura que a implementação 1 dispensa, e também por isso que ela funciona sem nenhum cliente rodando. Veja **[docs/implementations.pt-BR.md](docs/implementations.pt-BR.md)**.
+
+---
+
+## Duas formas de começar
 
 **A. Percurso completo** — provisione um Azure PostgreSQL descartável, carregue os dados de telecom de exemplo e explore. Comece pelo [Início rápido](#início-rápido).
 
-**B. Traga o seu** — você já tem um banco PostgreSQL e um deployment do Azure OpenAI, e só quer apontar o agente para eles. **Sem nenhuma alteração de código**, apenas o `.env`. Comece por **[Usando seu próprio banco e modelo](docs/bring-your-own.pt-BR.md)**.
+**B. Traga o seu** — você já tem um banco PostgreSQL e um deployment de modelo, e só quer apontar o agente para eles. **Sem nenhuma alteração de código**, apenas o `.env`. Funciona com qualquer uma das implementações. Comece por **[Usando seu próprio banco e modelo](docs/bring-your-own.pt-BR.md)**.
 
 ---
 
 ## Sumário
 
+- [As duas implementações](#as-duas-implementações)
 - [O que você vai aprender](#o-que-você-vai-aprender)
 - [Pré-requisitos](#pré-requisitos)
 - [Início rápido](#início-rápido)
+- [Implementação 2 — o Foundry Agent Service](#implementação-2--o-foundry-agent-service)
 - [Usando seu próprio banco](#usando-seu-próprio-banco)
 - [O que cada arquivo faz](#o-que-cada-arquivo-faz)
 - [Os três exemplos](#os-três-exemplos)
@@ -59,6 +110,7 @@ Ao final, você será capaz de:
 4. Manter contexto entre turnos com um `AgentSession`, para que perguntas de acompanhamento como *"agora resolva esse aí"* funcionem.
 5. Colocar um humano no circuito, de forma que nenhum comando rode sem aprovação.
 6. Provisionar e destruir os recursos no Azure com um comando.
+7. Construir o *mesmo* agente no Foundry Agent Service, vê-lo versionado no portal e entender exatamente o que o framework estava fazendo por você.
 
 > **Atenção se você já viu outros exemplos.** A API do Agent Framework mudou entre os betas `1.0.0bYYMMDD` e o release 1.x GA. A maioria dos posts e exemplos na internet — incluindo os que inspiraram este repositório — usa os nomes antigos e **não roda hoje**. Veja [Mudanças de API](#mudanças-de-api-desde-os-betas).
 
@@ -73,8 +125,10 @@ Ao final, você será capaz de:
 | **[Azure CLI](https://aka.ms/installazurecli)** | Usado no provisionamento e no login com Entra ID. |
 | **Uma subscription Azure** | Com permissão para criar um PostgreSQL flexible server. |
 | **Um deployment do Azure OpenAI / Foundry** | Qualquer modelo com suporte a tool calling: `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, ... Você precisa da role **Cognitive Services OpenAI User** no recurso. |
+| **Um projeto Foundry** | *Somente para a implementação 2.* Mais a role **Azure AI User** nele, que é o que concede escrita em agents. |
+| **Container Registry + Container Apps** | *Somente para a implementação 2.* O `infra/deploy-mcp.ps1` cria os dois; você só precisa ter permissão. A imagem é construída no Azure, então Docker local não é necessário. |
 
-Você **não** precisa de `psql`, Docker, nem de conhecimento prévio de MCP.
+Você **não** precisa de `psql`, Docker, nem de conhecimento prévio de MCP. A implementação 1 não precisa de projeto Foundry, e a implementação 2 não precisa das variáveis `AZURE_OPENAI_*` — você pode rodar uma sem configurar a outra.
 
 ---
 
@@ -129,8 +183,10 @@ Verifying:
 
 ### 5. Converse com o agente
 
+Esta é a **implementação 1**, a do Agent Framework:
+
 ```powershell
-python -m src.main
+python -m src.maf.main
 ```
 
 ```
@@ -160,9 +216,81 @@ O trace embaixo de cada resposta é o ponto central do exemplo: **nada fica esco
 
 ---
 
+## Implementação 2 — o Foundry Agent Service
+
+Tudo acima monta o agente **em memória**: ele existe enquanto o `python` está rodando e desaparece quando o processo termina.
+
+A segunda implementação registra exatamente o mesmo agente num projeto Foundry. Acrescente três linhas ao `.env`:
+
+```ini
+FOUNDRY_PROJECT_ENDPOINT=https://<recurso>.services.ai.azure.com/api/projects/<projeto>
+FOUNDRY_AGENT_NAME=fiberops-agent
+FOUNDRY_MODEL_DEPLOYMENT=gpt-4.1
+```
+
+### 1. Publique o servidor MCP
+
+O Agent Service chama o servidor MCP sozinho, então ele precisa estar em algum lugar que o Azure alcance. Este script constrói a imagem (no Azure — sem Docker local), implanta no Container Apps, libera o firewall do banco para ele e guarda a credencial do endpoint numa project connection do Foundry:
+
+```powershell
+pwsh infra/deploy-mcp.ps1 -AccessMode restricted
+```
+
+```
+==> Building the image (this runs in Azure, not on your machine)
+    Built mafmcp....azurecr.io/postgres-mcp:20260916181350
+==> Deploying the container app 'postgres-mcp'
+    Endpoint: https://postgres-mcp....azurecontainerapps.io/mcp
+==> Creating the Foundry project connection
+    Connection 'postgres-mcp' holds the secret; the agent references it by name.
+```
+
+Ele escreve `MCP_SERVER_URL` e `MCP_CONNECTION_NAME` no `.env` para você.
+
+### 2. Registre o agente
+
+```powershell
+python -m src.foundry.sync
+```
+
+```
+Done. 'fiberops-agent' is now at version 1.
+It has one tool, 'postgres', pointing at the MCP server above.
+```
+
+O agente passa a aparecer em **Agents** no portal do Foundry com exatamente **uma ferramenta**:
+
+```json
+{
+  "type": "mcp",
+  "server_label": "postgres",
+  "server_url": "https://postgres-mcp....azurecontainerapps.io/mcp",
+  "require_approval": "never",
+  "project_connection_id": "postgres-mcp"
+}
+```
+
+Rode o sync de novo e você tem a versão 2 — a definição fica no controle de versão, e cada implantação dela fica registrada no projeto.
+
+### 3. Converse com ele
+
+```powershell
+python -m src.foundry.main
+```
+
+A experiência de chat é propositalmente idêntica à do `python -m src.maf.main`, incluindo o trace de SQL. **Mas agora essa CLI é opcional** — abra o agente no playground do portal do Foundry e ele responde por lá também, porque nada roda na sua máquina.
+
+Você precisa da role **Azure AI User** no projeto. Ler agentes e escrevê-los são permissões diferentes, então listar agentes pode funcionar enquanto o sync falha com `403 ... agents/write`.
+
+> 💰 O contêiner roda com `min-replicas 1`, então ele custa dinheiro enquanto existir. Quando terminar: `az containerapp delete -g rg-maf-postgres-demo -n postgres-mcp --yes`
+
+**→ Por que foi construído assim, as quatro coisas que só apareceram em tempo de execução e como endurecer isso: [docs/implementations.pt-BR.md](docs/implementations.pt-BR.md)**
+
+---
+
 ## Usando seu próprio banco
 
-Tudo acima assume que você rodou o script de provisionamento. Se você já tem um banco PostgreSQL e um deployment do Azure OpenAI, pode pular tudo isso — **sem nenhuma alteração de código**.
+Tudo acima assume que você rodou o script de provisionamento. Se você já tem um banco PostgreSQL e um deployment de modelo, pode pular tudo isso — **sem nenhuma alteração de código**, e funciona com qualquer uma das implementações.
 
 ```bash
 pip install -r requirements.txt
@@ -193,7 +321,7 @@ POSTGRES_MCP_ACCESS_MODE=restricted
 
 ```bash
 az login
-python -m src.main
+python -m src.maf.main
 ```
 
 **O passo que realmente importa é o `AGENT_INSTRUCTIONS_FILE`.** Por padrão o agente usa um prompt que descreve o schema de exemplo do FiberOps; aponte-o para o seu banco sem mudar isso e ele vai procurar tabelas que não existem. Você tem duas opções:
@@ -205,7 +333,7 @@ python -m src.main
 
 A CLI mostra qual prompt está ativo na inicialização, então você nunca fica no escuro.
 
-Os scripts em `src/examples/` foram escritos para os dados de exemplo e se recusam a rodar no seu banco, em vez de fazer algo sem sentido ou destrutivo.
+Os scripts em `src/maf/examples/` foram escritos para os dados de exemplo e se recusam a rodar no seu banco, em vez de fazer algo sem sentido ou destrutivo.
 
 **→ Guia completo, incluindo segurança, permissões e um setup só com Docker: [docs/bring-your-own.pt-BR.md](docs/bring-your-own.pt-BR.md)**
 
@@ -216,17 +344,31 @@ Os scripts em `src/examples/` foram escritos para os dados de exemplo e se recus
 ```
 postgres-maf/
 ├── src/
-│   ├── config.py       Carrega e valida o .env. Python puro, sem framework.
-│   ├── agent.py        >>> O ARQUIVO QUE VALE A PENA LER <<<
-│   │                   Monta o chat client, a ferramenta MCP e o Agent.
-│   ├── main.py         CLI interativa: streaming, sessões, slash commands.
-│   ├── trace.py        Extrai as tool calls da resposta para você ver o SQL.
-│   └── examples/
-│       ├── read_only.py       Exemplo 1 - apenas consultas
-│       ├── read_write.py      Exemplo 2 - lê, escreve, comprova a persistência
-│       └── human_approval.py  Exemplo 3 - aprove cada comando
+│   ├── common/          COMPARTILHADO PELAS DUAS IMPLEMENTAÇÕES
+│   │   ├── config.py       Carrega e valida a parte comum do .env.
+│   │   ├── prompts.py      O prompt de sistema que descreve o schema.
+│   │   ├── preflight.py    Falha rápido quando o banco está inacessível.
+│   │   └── trace.py        Imprime o SQL que o modelo escreveu.
+│   ├── maf/             IMPLEMENTAÇÃO 1 - MICROSOFT AGENT FRAMEWORK
+│   │   ├── agent.py        >>> O ARQUIVO QUE VALE A PENA LER <<<
+│   │   │                   Monta o chat client, a ferramenta MCP e o Agent.
+│   │   ├── config.py       Somente AZURE_OPENAI_*.
+│   │   ├── mcp_server.py   Sobe o postgres-mcp com uvx.
+│   │   ├── main.py         CLI interativa: streaming, sessões, slash commands.
+│   │   └── examples/
+│   │       ├── read_only.py       Exemplo 1 - apenas consultas
+│   │       ├── read_write.py      Exemplo 2 - lê, escreve, comprova a persistência
+│   │       └── human_approval.py  Exemplo 3 - aprove cada comando
+│   └── foundry/         IMPLEMENTAÇÃO 2 - FOUNDRY AGENT SERVICE
+│       ├── agent.py        >>> O ARQUIVO QUE VALE A PENA LER <<<
+│       │                   A definição do prompt agent: modelo, prompt, uma tool MCP.
+│       ├── config.py       FOUNDRY_* e o endpoint MCP. Sem credenciais de banco.
+│       ├── sync.py         Registra o agente no seu projeto Foundry.
+│       └── main.py         CLI interativa. Uma requisição por turno.
 ├── infra/                      SÓ é necessário para criar o ambiente de demo
 │   ├── provision.ps1 / .sh    Cria os recursos no Azure + escreve o .env
+│   ├── deploy-mcp.ps1         Publica o servidor MCP (só implementação 2)
+│   ├── mcp-server/            Dockerfile + camada de autenticação do contêiner
 │   ├── seed.sql               Schema de telecom e dados de exemplo
 │   ├── seed.py                Aplica o seed.sql (sem precisar de psql)
 │   └── teardown.ps1 / .sh     Para ou apaga tudo
@@ -234,6 +376,7 @@ postgres-maf/
 │   ├── auto-discover-schema.md  Agente inspeciona qualquer banco em runtime
 │   └── template.md              Copie e descreva suas próprias tabelas
 ├── docs/
+│   ├── implementations.pt-BR.md   As duas implementações, comparadas a fundo
 │   ├── bring-your-own.pt-BR.md    Usando seu próprio banco e modelo
 │   ├── architecture.pt-BR.md      Como as peças se encaixam
 │   └── troubleshooting.pt-BR.md   Todos os erros que enfrentamos, e a solução
@@ -241,18 +384,20 @@ postgres-maf/
 └── requirements.txt / pyproject.toml
 ```
 
-Comece por [`src/agent.py`](src/agent.py). São cerca de 80 linhas de código de verdade; o resto é explicação.
+**Nada em `src/common/` sabe qual implementação está rodando**, e nenhuma das duas importa da outra. É isso que torna a comparação honesta: se as duas se comportam de forma diferente, é o SDK, não o setup.
+
+Comece por [`src/maf/agent.py`](src/maf/agent.py) ou [`src/foundry/agent.py`](src/foundry/agent.py). Cada um tem cerca de 80 linhas de código de verdade; o resto é explicação.
 
 ---
 
 ## Os três exemplos
 
-Rode-os nesta ordem.
+Eles pertencem à implementação 1. Rode-os nesta ordem.
 
 ### Exemplo 1 — leitura
 
 ```powershell
-python -m src.examples.read_only
+python -m src.maf.examples.read_only
 ```
 
 Quatro perguntas independentes, de uma contagem simples até o tempo médio de resolução por severidade. Nenhum `session=` é passado, então cada pergunta é isolada.
@@ -260,7 +405,7 @@ Quatro perguntas independentes, de uma contagem simples até o tempo médio de r
 ### Exemplo 2 — escrita
 
 ```powershell
-python -m src.examples.read_write
+python -m src.maf.examples.read_write
 ```
 
 O exemplo que importa. Quatro turnos compartilhando **uma sessão**:
@@ -277,7 +422,7 @@ Você pode restaurar os dados a qualquer momento com `python -m infra.seed`.
 ### Exemplo 3 — humano no circuito
 
 ```powershell
-python -m src.examples.human_approval
+python -m src.maf.examples.human_approval
 ```
 
 Muda a ferramenta MCP para `approval_mode="always_require"` e pede ao agente para apagar alertas antigos. Cada comando é mostrado a você antes:
@@ -298,7 +443,7 @@ Responda `n` e nada acontece. Esse é o padrão que você quer antes de apontar 
 
 ## Coisas para experimentar
 
-Com o `python -m src.main` rodando:
+Funciona com qualquer uma das implementações — `python -m src.maf.main` ou `python -m src.foundry.main`:
 
 **Leitura**
 - Quais enlaces estão degradados, e quantos alertas cada um gerou?
@@ -326,9 +471,11 @@ O agente responde no idioma em que você escreve.
 
 ## Como funciona
 
-Três objetos, montados em [`src/agent.py`](src/agent.py).
+### Implementação 1 — Agent Framework
 
-### 1. O chat client — o cérebro
+Três objetos, montados em [`src/maf/agent.py`](src/maf/agent.py).
+
+#### 1. O chat client — o cérebro
 
 ```python
 from agent_framework.openai import OpenAIChatClient
@@ -346,7 +493,7 @@ Duas pegadinhas:
 - A classe é `OpenAIChatClient`, e **não** `AzureOpenAIChatClient`. Passar `azure_endpoint=` é o que aponta o cliente para o Azure.
 - O parâmetro `model=` espera o **nome do deployment**, que no Azure frequentemente é diferente do id do modelo.
 
-### 2. A ferramenta — as mãos
+#### 2. A ferramenta — as mãos
 
 ```python
 from agent_framework import MCPStdioTool
@@ -366,7 +513,7 @@ A string de conexão vai em `env`, nunca em `args`: argumentos de linha de coman
 
 O pin `--with "mcp<2"` é obrigatório. O `postgres-mcp` foi feito para a v1 do SDK do MCP; sem o pin você recebe um confuso erro `Connection closed`. Detalhes em [solução de problemas](docs/troubleshooting.pt-BR.md#mcp-server-failed-to-initialize-connection-closed).
 
-### 3. O agente — juntando tudo
+#### 3. O agente — juntando tudo
 
 ```python
 from agent_framework import Agent
@@ -381,9 +528,9 @@ async with agent:                      # <-- inicia o processo filho do MCP
 
 **O `async with` não é opcional.** É ele que inicia e encerra o servidor MCP. Se você esquecer, o modelo vai dizer que não tem como acessar o banco — o erro mais comum com ferramentas MCP.
 
-O system prompt em `agent.py` descreve todo o schema. O servidor MCP *poderia* descobrir isso sozinho, mas declarar de antemão significa menos idas e vindas, muito menos nomes de coluna inventados, e um lugar natural para regras que o schema não consegue expressar (*"ao resolver um alerta você também precisa preencher `resolved_at`"*).
+O system prompt vem de [`src/common/prompts.py`](src/common/prompts.py) e descreve todo o schema. O servidor MCP *poderia* descobrir isso sozinho, mas declarar de antemão significa menos idas e vindas, muito menos nomes de coluna inventados, e um lugar natural para regras que o schema não consegue expressar (*"ao resolver um alerta você também precisa preencher `resolved_at`"*).
 
-### Mudanças de API desde os betas
+#### Mudanças de API desde os betas
 
 Se você está portando código de um exemplo antigo:
 
@@ -395,6 +542,68 @@ Se você está portando código de um exemplo antigo:
 | `agent.run_stream(...)` | `agent.run(..., stream=True)` |
 | `AgentThread`, `agent.get_new_thread()` | `AgentSession`, `agent.create_session()` |
 | `MCPSSETool` | removido — use `MCPStdioTool` ou `MCPStreamableHTTPTool` |
+
+### Implementação 2 — Foundry Agent Service
+
+Três passos, em [`src/foundry/`](src/foundry/) e [`infra/mcp-server/`](infra/mcp-server/).
+
+#### 1. Publique o servidor MCP
+
+O `postgres-mcp` fala stdio por padrão, e o Agent Service não consegue subir um processo na sua máquina. Então ele roda como contêiner, servindo as mesmas ferramentas sobre Streamable HTTP:
+
+```python
+app = postgres_mcp.mcp.streamable_http_app()
+app.add_middleware(BearerTokenMiddleware, token=token)   # ele não tem auth própria
+```
+
+Duas coisas aqui merecem atenção antes de você copiar isso. Primeiro, esse transporte só existia no `main` quando isto foi escrito, então a imagem fixa um commit em vez de uma release. Segundo, o `postgres-mcp` **não tem nenhuma autenticação** — o middleware de bearer acima é nosso, e é a única razão de o endpoint não ser um proxy de SQL aberto.
+
+As credenciais do banco vivem nesse contêiner. Nada na sua máquina precisa delas.
+
+#### 2. Descreva o agente e guarde-o no projeto
+
+```python
+definition = PromptAgentDefinition(
+    model="gpt-4.1",
+    instructions=PROMPT_DO_SCHEMA,
+    tools=[MCPTool(
+        server_label="postgres",
+        server_url=cfg.mcp_server_url,
+        project_connection_id=cfg.mcp_connection_name,   # não headers - veja abaixo
+        require_approval="never",
+    )],
+)
+client.agents.create_version(agent_name="fiberops-agent", definition=definition)
+```
+
+**Uma ferramenta, não nove.** A definição do agente diz *"existe um servidor MCP de Postgres ali"*; o serviço conecta, lista as ferramentas e as chama. As nove ferramentas nunca aparecem na definição, que é como uma integração MCP deveria se parecer.
+
+Passar o token bearer como header inline é rejeitado de cara:
+
+> *Headers that can include sensitive information are not allowed in the headers property for MCP tools. Use project_connection_id instead.*
+
+Então o segredo vai para uma **project connection** e o agente a referencia pelo nome. O `deploy-mcp.ps1` a cria para você.
+
+Diferente da implementação 1, esse objeto agora *persiste*. Ele está no projeto, versionado, e qualquer pessoa com acesso consegue vê-lo.
+
+#### 3. Envie uma requisição
+
+```python
+AGENT = {"agent_reference": {"name": agent_name, "type": "agent_reference"}}
+
+# O serviço rejeita null explícito, então o primeiro turno precisa omitir isto.
+carry = {"previous_response_id": previous_response_id} if previous_response_id else {}
+
+response = openai_client.responses.create(
+    model=model, input=user_input, extra_body=AGENT, **carry,
+)
+```
+
+É o turno inteiro. Não há laço de ferramentas aqui — o serviço o executa, e o SQL que a nossa CLI imprime é lido de volta do `response.output` depois, apenas para você ver o que aconteceu.
+
+O `extra_body` é o que seleciona o agente armazenado — sem ele você está falando com um deployment de modelo puro, sem instruções e sem ferramentas. A chave é `agent_reference`; a antiga `agent` é rejeitada como descontinuada.
+
+Como nada disso é necessário para o agente funcionar, o mesmo agente responde no **playground do portal**, a partir de uma routine agendada ou de outro agente. Essa é a diferença real entre as duas implementações.
 
 ---
 
@@ -411,6 +620,8 @@ Antes de apontar um agente para dados que você preza, aplique estas medidas em 
 3. **`POSTGRES_MCP_APPROVAL_MODE=always_require`.** Um humano aprova cada comando — veja o Exemplo 3.
 4. **`allowed_tools=[...]`** no `MCPStdioTool`, escondendo tudo exceto as chamadas que você quer.
 
+Na implementação 2 os três primeiros valem sem mudança — são propriedades do banco e do servidor MCP, não do runtime. Para restringir a lista de ferramentas lá, sincronize menos delas: filtre o retorno de `discover_tools()` antes de montar a definição.
+
 Além disso:
 
 - O `.env` guarda a senha do banco e está no `.gitignore`. Mantenha assim.
@@ -422,6 +633,12 @@ Além disso:
 ## Custo e limpeza
 
 Um servidor Burstable `Standard_B1ms` com 32 GB custa aproximadamente **USD 15–20 por mês** se ficar ligado. O consumo de Azure OpenAI neste exemplo é de alguns centavos.
+
+Se você rodou a implementação 2, o contêiner do MCP fica com `min-replicas 1` para o Agent Service nunca pegar cold start — o que significa cobrança contínua. Apague quando terminar:
+
+```powershell
+az containerapp delete -g rg-maf-postgres-demo -n postgres-mcp --yes
+```
 
 **Pause entre as sessões** (mantém seus dados; o Azure religa sozinho depois de 7 dias):
 
@@ -451,14 +668,20 @@ A versão curta de [docs/troubleshooting.pt-BR.md](docs/troubleshooting.pt-BR.md
 | `The location is restricted from performing this operation` | Sua subscription não pode criar PostgreSQL naquela região. O script sugere alternativas. |
 | O agente diz que não consegue acessar o banco | Você esqueceu do `async with agent:`. |
 | `401` / `PermissionDenied` do Azure OpenAI | Você precisa da role **Cognitive Services OpenAI User** e de um novo `az login`. |
+| `403 ... agents/write` no sync | Implementação 2. Você precisa da role **Azure AI User** no projeto Foundry. |
+| `421 Misdirected Request` vindo do endpoint MCP | A proteção contra DNS rebinding do SDK do MCP rejeitando o header `Host`. Defina `ALLOWED_HOST` no container app com o FQDN dele mesmo. |
+| `Headers that can include sensitive information are not allowed` | Você colocou o token bearer em `headers` da tool. Use `project_connection_id`. |
+| `connection timeout expired` *vindo do contêiner*, não de você | O firewall do banco não libera a saída do Container Apps. Rode `infra/deploy-mcp.ps1` de novo. |
 | Muitos `INFO Processing request of type ...` | Normal. É o servidor MCP escrevendo log no stderr. |
 
 ---
 
 ## Próximos passos
 
-- **Adicione suas próprias ferramentas.** O parâmetro `tools=` aceita funções Python comuns junto com a ferramenta MCP; o Agent Framework as converte em definições de ferramenta automaticamente.
-- **Adicione um segundo servidor MCP.** Passe uma lista em `tools=`. O [Microsoft Learn MCP server](https://learn.microsoft.com/api/mcp) funciona bem com `MCPStreamableHTTPTool`.
+- **Adicione suas próprias ferramentas.** Na implementação 1, o parâmetro `tools=` aceita funções Python comuns junto com a ferramenta MCP. Na implementação 2, acrescente outra entrada em `tools=` na definição — um segundo `MCPTool`, ou um `FunctionTool` que você trata no cliente.
+- **Adicione um segundo servidor MCP.** Passe uma lista em `tools=`. O [Microsoft Learn MCP server](https://learn.microsoft.com/api/mcp) funciona bem com `MCPStreamableHTTPTool` — ou, na implementação 2, como um `MCPTool` nativo, já que ele é um endpoint HTTPS remoto.
+- **Troque o token bearer por Entra ID.** A autenticação do contêiner é um segredo compartilhado, que é o ponto mais fraco da implementação 2. Coloque autenticação do Container Apps ou API Management na frente e dê uma managed identity ao projeto — veja [docs/implementations.pt-BR.md](docs/implementations.pt-BR.md).
+- **Avalie o agente.** Um agente armazenado no Foundry pode passar pelo ferramental de avaliação do Foundry, que é uma das melhores razões para escolher a implementação 2.
 - **Busca vetorial.** Habilite o `pgvector` no servidor e dê ao agente busca semântica sobre as descrições dos alertas — veja [Agentes de IA no Azure Database for PostgreSQL](https://learn.microsoft.com/pt-br/azure/postgresql/azure-ai/generative-ai-agents).
 - **Persista as conversas.** O Agent Framework traz `SessionStore` / `FileSessionStore`; guarde as sessões no próprio Postgres.
 - **Multi-agente.** O Agent Framework tem workflows e orquestrações para agentes que passam trabalho entre si.
