@@ -50,6 +50,18 @@ class ToolCall:
                 return value.strip()
         return None
 
+    @property
+    def code(self) -> str | None:
+        """The Python the code interpreter ran, when this was that tool."""
+        if isinstance(self.arguments, dict):
+            value = self.arguments.get("code")
+            if isinstance(value, str):
+                return value.strip()
+        return None
+
+
+CODE_INTERPRETER = "code_interpreter"
+
 
 def extract_tool_calls(response: Any) -> list[ToolCall]:
     """Pull every tool call (and matching result) out of an `AgentResponse`."""
@@ -58,6 +70,9 @@ def extract_tool_calls(response: Any) -> list[ToolCall]:
 
     for message in getattr(response, "messages", []) or []:
         for content in getattr(message, "contents", []) or []:
+            if _collect_code_interpreter(content, calls, order):
+                continue
+
             call_id = getattr(content, "call_id", None)
             if not call_id:
                 continue
@@ -78,6 +93,65 @@ def extract_tool_calls(response: Any) -> list[ToolCall]:
     return [calls[cid] for cid in order if cid in calls]
 
 
+def _collect_code_interpreter(
+    content: Any,
+    calls: dict[str, ToolCall],
+    order: list[str],
+) -> bool:
+    """Record a hosted code interpreter run. Returns True when it handled one.
+
+    Hosted tools do not look like function calls: there is no `name` and no
+    `result`, just a pair of contents typed `code_interpreter_tool_call` and
+    `code_interpreter_tool_result`. The Python the model wrote is not on the
+    content itself either - it is on the provider object underneath.
+    """
+    content_type = str(getattr(content, "type", ""))
+    if CODE_INTERPRETER not in content_type:
+        return False
+
+    call_id = getattr(content, "call_id", None)
+    if not call_id:
+        return True
+
+    raw = getattr(content, "raw_representation", None)
+    code = _code_from_raw(raw)
+
+    if call_id not in calls:
+        calls[call_id] = ToolCall(name=CODE_INTERPRETER, arguments={"code": code or ""})
+        order.append(call_id)
+    elif code and not calls[call_id].arguments.get("code"):
+        calls[call_id].arguments = {"code": code}
+
+    outputs = getattr(content, "outputs", None) or getattr(raw, "outputs", None)
+    if outputs:
+        calls[call_id].result = _shorten(_clean_result(str(outputs)))
+
+    return True
+
+
+def _code_from_raw(raw: Any) -> str | None:
+    """Dig the generated Python out of the provider object.
+
+    Streaming and non-streaming disagree about shape. Awaiting the whole
+    response gives one object with `.code`; streaming gives the list of events
+    that produced it, where the final `...code.done` event carries the full
+    text and the ones before it carry fragments.
+    """
+    if raw is None:
+        return None
+
+    if not isinstance(raw, list):
+        return getattr(raw, "code", None)
+
+    for event in reversed(raw):
+        code = getattr(event, "code", None)
+        if code:
+            return code
+
+    fragments = [getattr(event, "delta", "") or "" for event in raw]
+    return "".join(fragments) or None
+
+
 def _parse_arguments(arguments: Any) -> dict[str, Any] | str:
     """Tool arguments arrive as a JSON string. Decode when we can."""
     if isinstance(arguments, dict):
@@ -91,16 +165,37 @@ def _parse_arguments(arguments: Any) -> dict[str, Any] | str:
     return {}
 
 
+def clean_tool_result(text: str) -> str:
+    """Make a raw tool result readable: drop the MCP envelope, then truncate.
+
+    Callers that collect tool calls themselves - `src/foundry/main.py` and the
+    web UI - use this so their traces look like the Agent Framework ones.
+    """
+    return _shorten(_clean_result(text))
+
+
 def _clean_result(text: str) -> str:
     """Drop the raw MCP envelope from a tool result.
 
     The MCP server returns its payload twice: once as plain text, and once
-    wrapped in a `{"result": [{"type": "text", ...}]}` JSON envelope. Showing
-    both doubles the noise for zero extra information, so we keep only the
-    human-readable part.
+    wrapped in a JSON envelope. Showing both doubles the noise for zero extra
+    information, so we keep only the human-readable part.
+
+    The envelope has two spellings. Over stdio it arrives on its own line as
+    `{"result": [...]}`. The Agent Service appends a pretty-printed
+    `{"structuredResponse": ...}` object instead, whose opening brace sits on a
+    line of its own - so we find the key and cut back to the brace that opens it.
     """
     lines = [line for line in text.splitlines() if not line.lstrip().startswith('{"result":')]
-    return "\n".join(lines).strip() or text.strip()
+    cleaned = "\n".join(lines).strip() or text.strip()
+
+    key = cleaned.find('"structuredResponse"')
+    if key > 0:
+        brace = cleaned.rfind("{", 0, key)
+        if brace > 0:
+            cleaned = cleaned[:brace].strip()
+
+    return cleaned
 
 
 def _shorten(text: str, limit: int = 600) -> str:
@@ -127,10 +222,10 @@ def print_calls(calls: list[ToolCall], *, show_results: bool = True, colour: boo
     for index, call in enumerate(calls, start=1):
         print(_c(f"[{index}] {call.name}", CYAN, colour))
 
-        sql = call.sql
-        if sql:
-            # Indent the SQL so multi-line statements stay readable.
-            for line in sql.splitlines():
+        body = call.sql or call.code
+        if body:
+            # Indent so multi-line SQL and Python stay readable.
+            for line in body.splitlines():
                 print(f"    {_c(line, YELLOW, colour)}")
         else:
             print(f"    {_c(json.dumps(call.arguments, default=str), YELLOW, colour)}")

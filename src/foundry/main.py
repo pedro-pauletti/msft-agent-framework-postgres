@@ -28,7 +28,7 @@ from typing import Any
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.common.config import ConfigError
-from src.common.trace import ToolCall, print_calls
+from src.common.trace import CODE_INTERPRETER, ToolCall, clean_tool_result, print_calls
 from src.foundry.agent import build_project_client
 from src.foundry.config import load_foundry_app_config
 
@@ -176,14 +176,30 @@ def run_turn(
 
 
 def extract_mcp_calls(response: Any) -> list[ToolCall]:
-    """Pull the MCP tool calls out of a response so the SQL stays visible.
+    """Pull the tool calls out of a response so the work stays visible.
 
-    The Agent Service executed these remotely, but it still reports them, which
-    is what keeps this implementation as auditable as the local one.
+    The Agent Service executed all of these remotely - the SQL against the
+    published MCP server, the Python inside a code interpreter container - but
+    it still reports both, which is what keeps this implementation as auditable
+    as the local one.
     """
     calls: list[ToolCall] = []
     for item in getattr(response, "output", None) or []:
-        if "mcp" not in str(getattr(item, "type", "")):
+        item_type = str(getattr(item, "type", ""))
+
+        if CODE_INTERPRETER in item_type:
+            code = getattr(item, "code", None)
+            if code:
+                calls.append(
+                    ToolCall(
+                        name=CODE_INTERPRETER,
+                        arguments={"code": code},
+                        result=_as_text(getattr(item, "outputs", None)),
+                    )
+                )
+            continue
+
+        if "mcp" not in item_type:
             continue
         name = getattr(item, "name", None)
         if not name:
@@ -213,7 +229,8 @@ def _parse_arguments(arguments: Any) -> dict[str, Any] | str:
 def _as_text(value: Any) -> str | None:
     if value is None:
         return None
-    return value if isinstance(value, str) else json.dumps(value, default=str)
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return clean_tool_result(text)
 
 
 def main() -> int:

@@ -88,6 +88,8 @@ src/
 - [Prerequisites](#prerequisites)
 - [Quickstart](#quickstart)
 - [Implementation 2 — the Foundry Agent Service](#implementation-2--the-foundry-agent-service)
+- [The contracts workbook](#the-contracts-workbook)
+- [The web UI](#the-web-ui)
 - [Using your own database](#using-your-own-database)
 - [What each file does](#what-each-file-does)
 - [The three examples](#the-three-examples)
@@ -288,6 +290,77 @@ You need the **Azure AI User** role on the project. Reading agents and writing t
 
 ---
 
+## The contracts workbook
+
+A database is rarely the only source of truth. Both agents also get a **code
+interpreter** with one spreadsheet attached, [data/fiberops-contracts.xlsx](data/fiberops-contracts.xlsx):
+
+| Sheet | Holds | Joins to |
+|---|---|---|
+| `SLA` | Customer, service tier, resolution deadline, penalty per hour | `fiber_links.code` |
+| `Maintenance` | Planned windows, work type, field crew | `fiber_links.code` |
+| `OnCall` | Engineer, phone, escalation manager | `sites.name` |
+
+None of that exists in Postgres, which is the point. Ask this:
+
+> Which open alert has the largest financial exposure?
+
+and the agent has to use **both tools in one turn** — SQL through the MCP server
+to find the open alerts, then pandas over the workbook to join them to the SLA
+sheet and multiply the overdue hours by the contractual penalty. Neither tool
+can answer it alone.
+
+The code runs in a sandboxed container at the provider, never on your machine.
+That is why this repo has no pandas dependency even though the agent uses
+pandas constantly.
+
+The workbook is committed, so there is nothing to run. To change the sample
+data, edit the tables in [infra/make_workbook.py](infra/make_workbook.py) and
+regenerate:
+
+```powershell
+pip install openpyxl
+python -m infra.make_workbook
+python -m src.foundry.sync     # implementation 2 pins a file id, so re-sync
+```
+
+The two implementations upload the file to **different places** — Azure OpenAI
+for implementation 1, the Foundry project for implementation 2 — so the same
+workbook has a different id in each. Neither re-uploads if a file with the same
+name is already there.
+
+---
+
+## The web UI
+
+The CLIs answer *what did the agent say?*. This answers *what did the agent do?*
+
+```powershell
+pip install -e ".[ui]"       # or: pip install -r requirements.txt
+python -m src.ui.server      # then open http://127.0.0.1:8100
+```
+
+One chat window, a switch between the two implementations, and a trace panel
+modelled on the Foundry portal playground:
+
+| Panel | Shows |
+|---|---|
+| **Tokens** | Input, output and total for the turn, plus how many were served from cache |
+| **Tool calls** | Every call the model made, with the SQL highlighted and the result it got back |
+| **Metadata** | Model, response id, finish reason, MCP transport, access mode, latency |
+| **Turns** | The history for this conversation — click any turn to re-inspect it |
+
+The switch at the top right is the point of the whole thing: ask both
+implementations the same question and watch the same SQL arrive by two
+completely different routes. Each keeps its own conversation, so switching
+back and forth is non-destructive.
+
+It is a thin layer over the same functions the CLIs call, so there is no
+second agent implementation hiding in it. If only one implementation is
+configured in `.env`, the other is greyed out with the reason.
+
+---
+
 ## Using your own database
 
 Everything above assumes you ran the provisioning script. If you already have a PostgreSQL database and a model deployment, you can skip all of that — **no code changes needed**, and it works with either implementation.
@@ -354,6 +427,7 @@ postgres-maf/
 │   │   │                   Builds the chat client, the MCP tool and the Agent.
 │   │   ├── config.py       AZURE_OPENAI_* only.
 │   │   ├── mcp_server.py   Starts postgres-mcp with uvx.
+│   │   ├── workbook.py     Uploads the xlsx to Azure OpenAI.
 │   │   ├── main.py         Interactive CLI: streaming, sessions, slash commands.
 │   │   └── examples/
 │   │       ├── read_only.py       Example 1 - queries only
@@ -365,10 +439,14 @@ postgres-maf/
 │       ├── config.py       FOUNDRY_* and the MCP endpoint. No database credentials.
 │       ├── sync.py         Registers the agent in your Foundry project.
 │       └── main.py         Interactive CLI. One request per turn.
+├── src/ui/                     LOCAL WEB UI - optional, talks to both
+│   ├── server.py              Thin FastAPI layer over the two runners
+│   └── static/                One HTML, CSS and JS file. No build step.
 ├── infra/                      ONLY needed to create the demo environment
 │   ├── provision.ps1 / .sh    Create Azure resources + write .env
 │   ├── deploy-mcp.ps1         Publish the MCP server (implementation 2 only)
 │   ├── mcp-server/            Dockerfile + auth wrapper for that container
+│   ├── make_workbook.py       Regenerates data/fiberops-contracts.xlsx
 │   ├── seed.sql               Telecom schema and sample data
 │   ├── seed.py                Applies seed.sql (no psql needed)
 │   └── teardown.ps1 / .sh     Stop or delete everything

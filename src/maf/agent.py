@@ -44,6 +44,8 @@ database.
 
 from __future__ import annotations
 
+from typing import Any
+
 from agent_framework import Agent, MCPStdioTool
 from agent_framework.openai import OpenAIChatClient
 from azure.identity import AzureCliCredential, ChainedTokenCredential, DefaultAzureCredential
@@ -52,6 +54,7 @@ from src.common.config import McpConfig, PostgresConfig
 from src.common.prompts import load_instructions
 from src.maf.config import AppConfig, AzureOpenAIConfig
 from src.maf.mcp_server import ensure_uvx_available, uvx_environment
+from src.maf.workbook import upload_workbook
 
 # =============================================================================
 # 1. The chat client (Azure OpenAI)
@@ -191,6 +194,7 @@ def build_agent(
     *,
     instructions: str | None = None,
     name: str = "PostgresAgent",
+    with_workbook: bool = True,
 ) -> Agent:
     """Assemble the full agent: Azure OpenAI + the Postgres MCP tool.
 
@@ -201,15 +205,23 @@ def build_agent(
             result = await agent.run("How many alerts are open?")
             print(result.text)
 
-    `Agent` is a normal object, so this function does no I/O and never fails
-    because of a bad password - problems surface when you enter the `async with`
-    block.
+    `Agent` is a normal object, so this function does no I/O beyond uploading
+    the workbook, and never fails because of a bad password - database problems
+    surface when you enter the `async with` block.
 
     When `instructions` is None (the default) the prompt comes from
     `AGENT_INSTRUCTIONS_FILE` if you set it in `.env`, and otherwise from the
     built-in FiberOps prompt. That is what lets you point this sample at your
     own database without editing any code.
+
+    `with_workbook=False` drops the code interpreter, which is what you want if
+    your Azure OpenAI resource does not have the container feature enabled.
     """
+    tools: list[Any] = [build_postgres_mcp_tool(config.postgres, config.mcp)]
+
+    if with_workbook:
+        tools.append(build_code_interpreter_tool(config.azure_openai))
+
     return Agent(
         client=build_chat_client(config.azure_openai),
         instructions=instructions
@@ -218,5 +230,21 @@ def build_agent(
         name=name,
         # `tools` accepts a single tool or a sequence. Adding a plain Python
         # function here would work too - MAF turns it into a tool automatically.
-        tools=build_postgres_mcp_tool(config.postgres, config.mcp),
+        tools=tools,
     )
+
+
+def build_code_interpreter_tool(cfg: AzureOpenAIConfig) -> Any:
+    """Attach the contracts workbook to a sandboxed Python environment.
+
+    The tool is hosted: the model writes Python, Azure OpenAI runs it in a
+    container with the file mounted, and only the result comes back. Nothing
+    executes on this machine, which is why no pandas import appears anywhere in
+    this repo despite the agent using pandas constantly.
+
+    `get_code_interpreter_tool` is a static method on the client class rather
+    than something you construct yourself, because the tool payload is
+    provider-specific. The `SupportsCodeInterpreterTool` protocol is how you
+    check at runtime whether a given client offers one.
+    """
+    return OpenAIChatClient.get_code_interpreter_tool(file_ids=[upload_workbook(cfg)])

@@ -25,7 +25,12 @@ it in the portal - and the MCP server is a container that outlives both.
 from __future__ import annotations
 
 from azure.ai.projects import AIProjectClient
-from azure.ai.projects.models import MCPTool, PromptAgentDefinition
+from azure.ai.projects.models import (
+    AutoCodeInterpreterToolParam,
+    CodeInterpreterTool,
+    MCPTool,
+    PromptAgentDefinition,
+)
 from azure.identity import AzureCliCredential, ChainedTokenCredential, DefaultAzureCredential
 
 from src.common.prompts import load_instructions
@@ -33,7 +38,8 @@ from src.foundry.config import FoundryAppConfig, FoundryConfig
 
 AGENT_DESCRIPTION = (
     "Answers questions about a PostgreSQL database and, depending on the "
-    "server's access mode, changes it. Backed by a Postgres MCP server."
+    "server's access mode, changes it. Backed by a Postgres MCP server, with "
+    "a contracts workbook attached to a code interpreter."
 )
 
 SERVER_LABEL = "postgres"
@@ -80,7 +86,25 @@ def build_postgres_mcp_tool(cfg: FoundryConfig) -> MCPTool:
     )
 
 
-def build_agent_definition(config: FoundryAppConfig) -> PromptAgentDefinition:
+def build_code_interpreter_tool(workbook_file_id: str) -> CodeInterpreterTool:
+    """Attach the contracts workbook to a sandboxed Python environment.
+
+    The file id has to be baked into the *definition*, which means the workbook
+    is uploaded before the agent version is created - see `src/foundry/sync.py`.
+    A consequence worth understanding: replacing the workbook means uploading it
+    again and syncing a new version, because version 3 of the agent points at
+    whichever file id was current when version 3 was written.
+    """
+    return CodeInterpreterTool(
+        container=AutoCodeInterpreterToolParam(type="auto", file_ids=[workbook_file_id])
+    )
+
+
+def build_agent_definition(
+    config: FoundryAppConfig,
+    *,
+    workbook_file_id: str | None = None,
+) -> PromptAgentDefinition:
     """Assemble the definition that gets stored in the project.
 
     The instructions come from the same place as on the Agent Framework path:
@@ -88,8 +112,13 @@ def build_agent_definition(config: FoundryAppConfig) -> PromptAgentDefinition:
     prompt. Pointing this implementation at your own database therefore needs no
     code change either - see docs/bring-your-own.md.
     """
+    tools: list[object] = [build_postgres_mcp_tool(config.foundry)]
+
+    if workbook_file_id:
+        tools.append(build_code_interpreter_tool(workbook_file_id))
+
     return PromptAgentDefinition(
         model=config.foundry.model_deployment,
         instructions=load_instructions(config.instructions_file),
-        tools=[build_postgres_mcp_tool(config.foundry)],
+        tools=tools,
     )

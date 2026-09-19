@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Postgres Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%236d3aed'/><text y='69' x='50' text-anchor='middle' font-size='56' fill='white' font-family='sans-serif' font-weight='bold'>P</text></svg>"
+    />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="mark">P</div>
+        <div>
+          <h1>Postgres Agent</h1>
+          <p id="subtitle">The same agent, two runtimes</p>
+        </div>
+      </div>
+
+      <div class="switch" id="switch">
+        <button data-impl="maf" class="active">
+          <span class="dot"></span> Agent Framework
+        </button>
+        <button data-impl="foundry">
+          <span class="dot"></span> Foundry Agent Service
+        </button>
+      </div>
+
+      <button class="ghost" id="reset" title="Drop the conversation history">New chat</button>
+    </header>
+
+    <main>
+      <section class="chat">
+        <div class="banner warn" id="banner"></div>
+
+        <div class="transcript" id="transcript">
+          <div class="empty" id="empty">
+            <h2>Ask the database something</h2>
+            <p>
+              The model writes the SQL itself. Every statement it runs shows up in the
+              trace panel, along with token counts and the metadata for the turn.
+            </p>
+            <div class="suggestions" id="suggestions"></div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-row">
+            <textarea
+              id="input"
+              rows="1"
+              placeholder="Which critical alerts are open right now?"
+              autofocus
+            ></textarea>
+            <button class="send" id="send">Send</button>
+          </div>
+          <p class="hint">Enter to send &middot; Shift+Enter for a new line</p>
+        </div>
+      </section>
+
+      <aside class="trace">
+        <div class="trace-head">
+          <h2>Trace</h2>
+          <p id="trace-sub">What the agent actually did</p>
+        </div>
+        <div class="trace-body" id="trace-body">
+          <div class="trace-empty">
+            Run a turn and this panel fills with the tool calls, the SQL the model
+            wrote, the token usage and the run metadata.
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

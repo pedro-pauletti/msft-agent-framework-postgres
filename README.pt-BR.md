@@ -88,6 +88,8 @@ src/
 - [Pré-requisitos](#pré-requisitos)
 - [Início rápido](#início-rápido)
 - [Implementação 2 — o Foundry Agent Service](#implementação-2--o-foundry-agent-service)
+- [A planilha de contratos](#a-planilha-de-contratos)
+- [A interface web](#a-interface-web)
 - [Usando seu próprio banco](#usando-seu-próprio-banco)
 - [O que cada arquivo faz](#o-que-cada-arquivo-faz)
 - [Os três exemplos](#os-três-exemplos)
@@ -288,6 +290,78 @@ Você precisa da role **Azure AI User** no projeto. Ler agentes e escrevê-los s
 
 ---
 
+## A planilha de contratos
+
+Um banco de dados raramente é a única fonte de verdade. Os dois agentes também
+recebem um **code interpreter** com uma planilha anexada,
+[data/fiberops-contracts.xlsx](data/fiberops-contracts.xlsx):
+
+| Aba | Contém | Liga com |
+|---|---|---|
+| `SLA` | Cliente, tier de serviço, prazo de resolução, multa por hora | `fiber_links.code` |
+| `Maintenance` | Janelas planejadas, tipo de trabalho, equipe de campo | `fiber_links.code` |
+| `OnCall` | Engenheiro de plantão, telefone, gestor de escalação | `sites.name` |
+
+Nada disso existe no Postgres — e é esse o ponto. Pergunte:
+
+> Qual alerta aberto tem a maior exposição financeira?
+
+e o agente precisa usar **as duas ferramentas no mesmo turno**: SQL pelo servidor
+MCP para achar os alertas abertos, depois pandas sobre a planilha para cruzá-los
+com a aba SLA e multiplicar as horas em atraso pela multa contratual. Nenhuma
+das duas responde isso sozinha.
+
+O código roda num contêiner isolado no provedor, nunca na sua máquina. É por isso
+que este repo não tem pandas como dependência, mesmo com o agente usando pandas
+o tempo todo.
+
+A planilha está commitada, então não há nada a rodar. Para mudar os dados de
+exemplo, edite as tabelas em [infra/make_workbook.py](infra/make_workbook.py) e
+regenere:
+
+```powershell
+pip install openpyxl
+python -m infra.make_workbook
+python -m src.foundry.sync     # a implementação 2 fixa um file id, então re-sincronize
+```
+
+As duas implementações sobem o arquivo para **lugares diferentes** — Azure OpenAI
+na implementação 1, o projeto Foundry na implementação 2 — então a mesma planilha
+tem um id diferente em cada uma. Nenhuma das duas reenvia se já existir um
+arquivo com o mesmo nome.
+
+---
+
+## A interface web
+
+As CLIs respondem *o que o agente disse?*. Esta responde *o que o agente fez?*
+
+```powershell
+pip install -e ".[ui]"       # ou: pip install -r requirements.txt
+python -m src.ui.server      # depois abra http://127.0.0.1:8100
+```
+
+Uma janela de chat, um seletor entre as duas implementações e um painel de trace
+inspirado no playground do portal do Foundry:
+
+| Painel | Mostra |
+|---|---|
+| **Tokens** | Entrada, saída e total do turno, mais quantos vieram do cache |
+| **Tool calls** | Cada chamada que o modelo fez, com o SQL realcado e o resultado recebido |
+| **Metadata** | Modelo, id da resposta, motivo de parada, transporte MCP, modo de acesso, latência |
+| **Turns** | O histórico da conversa — clique em qualquer turno para reinspecioná-lo |
+
+O seletor no canto superior direito é o ponto de tudo isso: faça a mesma
+pergunta às duas implementações e veja o mesmo SQL chegar por dois caminhos
+completamente diferentes. Cada uma guarda a própria conversa, então alternar
+entre elas não perde nada.
+
+É uma camada fina sobre as mesmas funções que as CLIs chamam, ou seja, não há
+uma segunda implementação de agente escondida aí. Se só uma implementação
+estiver configurada no `.env`, a outra aparece desabilitada com o motivo.
+
+---
+
 ## Usando seu próprio banco
 
 Tudo acima assume que você rodou o script de provisionamento. Se você já tem um banco PostgreSQL e um deployment de modelo, pode pular tudo isso — **sem nenhuma alteração de código**, e funciona com qualquer uma das implementações.
@@ -347,6 +421,7 @@ postgres-maf/
 │   ├── common/          COMPARTILHADO PELAS DUAS IMPLEMENTAÇÕES
 │   │   ├── config.py       Carrega e valida a parte comum do .env.
 │   │   ├── prompts.py      O prompt de sistema que descreve o schema.
+│   │   ├── workbook.py     Sobe a planilha de contratos para o code interpreter.
 │   │   ├── preflight.py    Falha rápido quando o banco está inacessível.
 │   │   └── trace.py        Imprime o SQL que o modelo escreveu.
 │   ├── maf/             IMPLEMENTAÇÃO 1 - MICROSOFT AGENT FRAMEWORK
@@ -354,6 +429,7 @@ postgres-maf/
 │   │   │                   Monta o chat client, a ferramenta MCP e o Agent.
 │   │   ├── config.py       Somente AZURE_OPENAI_*.
 │   │   ├── mcp_server.py   Sobe o postgres-mcp com uvx.
+│   │   ├── workbook.py     Sobe a planilha para o Azure OpenAI.
 │   │   ├── main.py         CLI interativa: streaming, sessões, slash commands.
 │   │   └── examples/
 │   │       ├── read_only.py       Exemplo 1 - apenas consultas
@@ -365,10 +441,14 @@ postgres-maf/
 │       ├── config.py       FOUNDRY_* e o endpoint MCP. Sem credenciais de banco.
 │       ├── sync.py         Registra o agente no seu projeto Foundry.
 │       └── main.py         CLI interativa. Uma requisição por turno.
+├── src/ui/                     INTERFACE WEB LOCAL - opcional, fala com as duas
+│   ├── server.py              Camada fina de FastAPI sobre os dois runners
+│   └── static/                Um HTML, um CSS e um JS. Sem etapa de build.
 ├── infra/                      SÓ é necessário para criar o ambiente de demo
 │   ├── provision.ps1 / .sh    Cria os recursos no Azure + escreve o .env
 │   ├── deploy-mcp.ps1         Publica o servidor MCP (só implementação 2)
 │   ├── mcp-server/            Dockerfile + camada de autenticação do contêiner
+│   ├── make_workbook.py       Regenera data/fiberops-contracts.xlsx
 │   ├── seed.sql               Schema de telecom e dados de exemplo
 │   ├── seed.py                Aplica o seed.sql (sem precisar de psql)
 │   └── teardown.ps1 / .sh     Para ou apaga tudo

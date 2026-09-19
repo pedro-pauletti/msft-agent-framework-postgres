@@ -44,6 +44,19 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["ruff>=0.6"]
 
+# The local web UI (src/ui/). Optional because both CLIs run without it:
+#   pip install -e ".[ui]"   then   python -m src.ui.server
+ui = ["fastapi>=0.115,<1", "uvicorn[standard]>=0.30,<1"]
+
+# Only infra/make_workbook.py needs this, and the workbook it produces is
+# committed - so you need it only to change the sample data.
+workbook = ["openpyxl>=3.1"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint.per-file-ignores]
+# openpyxl refuses timezone-aware datetimes, so the maintenance windows in the
+# sample workbook have to be naive.
+"infra/make_workbook.py" = ["DTZ001"]

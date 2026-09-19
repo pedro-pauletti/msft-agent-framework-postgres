@@ -19,3 +19,11 @@ mcp>=1.24,<2
 azure-identity>=1.19
 python-dotenv>=1.0
 psycopg[binary]>=3.2
+
+# Only the local web UI (src/ui/) needs these. Both CLIs run without them.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+
+# Only infra/make_workbook.py needs this. The agents never open the xlsx
+# themselves - the code interpreter does, in its own container.
+openpyxl>=3.1

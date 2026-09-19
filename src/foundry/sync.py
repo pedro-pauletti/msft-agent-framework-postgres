@@ -24,6 +24,7 @@ import sys
 from azure.core.exceptions import ClientAuthenticationError, HttpResponseError
 
 from src.common.config import ConfigError
+from src.common.workbook import ensure_workbook_uploaded
 from src.foundry.agent import (
     AGENT_DESCRIPTION,
     SERVER_LABEL,
@@ -54,14 +55,17 @@ def sync() -> int:
         )
     )
 
-    definition = build_agent_definition(config)
-
     print("\nSubmitting the agent definition...", flush=True)
     try:
         with build_project_client(config.foundry) as client:
+            # The workbook has to exist before the definition that references
+            # it, so this upload happens inside the same client session.
+            workbook_file_id = ensure_workbook_uploaded(client.get_openai_client().files)
+            print(f"Workbook   : {workbook_file_id}")
+
             version = client.agents.create_version(
                 agent_name=config.foundry.agent_name,
-                definition=definition,
+                definition=build_agent_definition(config, workbook_file_id=workbook_file_id),
                 description=AGENT_DESCRIPTION,
             )
     except ClientAuthenticationError as exc:
@@ -73,7 +77,8 @@ def sync() -> int:
         return 1
 
     print(f"\nDone. '{version.name}' is now at version {version.version}.")
-    print(f"It has one tool, '{SERVER_LABEL}', pointing at the MCP server above.")
+    print(f"It has two tools: '{SERVER_LABEL}' (MCP) and a code interpreter")
+    print("holding data/fiberops-contracts.xlsx.")
     print("\nTry it in the Foundry portal playground, or locally with:")
     print("  python -m src.foundry.main")
     return 0
